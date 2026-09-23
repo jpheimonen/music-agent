@@ -5,11 +5,11 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { JobRegistry } from './jobs.js';
-import { capabilities, stationId, type Capabilities } from '@music/contracts';
+import { capabilities, stationId, mediaId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, type Capabilities } from '@music/contracts';
 import { LibraryService, LibraryError, parseRange } from './library.js';
 import { stationDescriptors, resolveStation } from './stations.js';
 import { YoutubeService, YoutubeProviderError, parseVideoId, youtubeItem } from './youtube.js';
-import { mediaId, scanRequest, youtubeResolveRequest, youtubeSearchQuery } from '@music/contracts';
+import { TasteRepository, TasteError } from './taste.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie'] }, bodyLimit: 64 * 1024 });
@@ -17,7 +17,7 @@ const jobs = new JobRegistry();
 const library = new LibraryService(config.libraryRoot, config.dataDir);
 await library.initialize();
 const youtube = new YoutubeService(config.youtubeKey);
-const unavailable = (reason: string) => ({ state: 'unavailable' as const, reason });
+const tasteRepository = await TasteRepository.open(config.dataDir);
 const unimplemented = (feature: string) => ({ state: 'unavailable' as const, reason: `${feature} is not installed yet.` });
 const capabilitySnapshot = (): Capabilities => capabilities.parse({
   library: library.state,
@@ -79,6 +79,29 @@ app.get('/api/v1/youtube/search', async request => {
   const { q, maxResults } = youtubeSearchQuery.parse(request.query);
   return youtube.search(q, maxResults, request.raw.aborted ? AbortSignal.abort() : undefined);
 });
+app.get('/api/v1/taste', async (request) => {
+  const query = z.object({ mediaIds: z.string().optional() }).parse(request.query);
+  const ids = query.mediaIds?.split(',').filter(Boolean);
+  if (ids && ids.length > 100) throw new z.ZodError([]);
+  ids?.forEach(id => mediaId.parse(id));
+  return tasteRepository.snapshot(ids);
+});
+app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
+  const { mediaId: id } = z.object({ mediaId }).parse(request.params);
+  const body = feedbackRequest.parse(request.body);
+  const key = request.headers['idempotency-key'];
+  if (typeof key !== 'string') return reply.code(400).send(fail('invalid_request', 'Idempotency-Key header is required.', 400, request.id).body);
+  try { return await tasteRepository.react({ mediaId: id, ...body, idempotencyKey: key }); }
+  catch (error) {
+    if (error instanceof TasteError) {
+      const status = error.code === 'revision_conflict' || error.code === 'external_file_change' ? 409 : 503;
+      const body = fail(error.code, error.message, status, request.id, error.code === 'storage_unavailable').body;
+      if (error.code === 'revision_conflict') Object.assign(body.error, { details: tasteRepository.snapshot([id]) });
+      return reply.code(status).send(body);
+    }
+    throw error;
+  }
+});
 app.get('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.get(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.delete('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.cancel(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.get('/api/v1/stations', async () => stationDescriptors());
@@ -86,5 +109,5 @@ app.post('/api/v1/stations/:id/resolve', async request => resolveStation(config,
 app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/')) return reply.code(404).send(fail('not_found', 'API route not found.', 404, request.id).body); return reply.code(404).send('Not found'); });
 const webDist = resolve(import.meta.dirname, '../../web/dist');
 if (existsSync(webDist)) await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: false });
-app.addHook('onClose', async () => { await jobs.stop(); });
+app.addHook('onClose', async () => { await jobs.stop(); await tasteRepository.close(); });
 try { await app.listen({ port: config.port, host: '127.0.0.1' }); } catch (error) { app.log.error(error); process.exitCode = 1; }
