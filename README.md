@@ -16,11 +16,13 @@ Open http://127.0.0.1:8787. The server binds loopback only and serves the built 
 
 Set environment values before starting. `.env.example` lists them without credentials. `MUSIC_LIBRARY_ROOT` must be absolute. `MUSIC_DATA_DIR` defaults to the repository's `data/` directory; relative `MUSIC_DATA_DIR` and `MUSIC_CODEX_HOME` overrides are resolved from the repository root even when npm starts the server in its workspace. Do not expose the data directory publicly. Optional station endpoint overrides must be credential-free HTTPS.
 
-The browser uses `/api/v1`. JSON API errors include a stable code and request ID. No CORS is enabled. Requests are limited to local Host and same-origin mutation Origin. Jobs are in-memory and cancellation is best effort; feature workers will attach bounded operations. A server restart does not resume a job.
+The browser uses `/api/v1`. JSON API errors include a stable code and request ID. No CORS is enabled. Requests are limited to local Host and same-origin mutation Origin. Jobs run in memory; cancellation is best effort, and a server restart does not resume them.
 
 ## Media setup
 
-Set `MUSIC_LIBRARY_ROOT` to an absolute readable MP3 directory. POST `/api/v1/library/scans` with `{}` to build the catalog; poll `/api/v1/jobs/:id`. Pass `{ "full": true }` to rehash every file. `GET /api/v1/library/tracks?q=&cursor=&limit=` returns bounded pages. Indexed files use full content SHA-256 identities and support GET/HEAD byte ranges at `/api/v1/media/local/:id`. The catalog under `MUSIC_DATA_DIR` is rebuildable. Changing tags changes identity.
+Set `MUSIC_LIBRARY_ROOT` to an absolute readable MP3 directory before starting the server. In the app, choose **Local**, select **Rescan**, then play a track from **Your collection**. Use **Start DJ** in Local or YouTube for taste-informed selections, or choose a radio station and **Listen live**. **Setup** shows source availability and configuration details.
+
+For API access, POST `/api/v1/library/scans` with `{}` to build the catalog; poll `/api/v1/jobs/:id`. Pass `{ "full": true }` to rehash every file. `GET /api/v1/library/tracks?q=&cursor=&limit=` returns bounded pages. Indexed files use full content SHA-256 identities and support GET/HEAD byte ranges at `/api/v1/media/local/:id`. The catalog under `MUSIC_DATA_DIR` is rebuildable. Changing tags changes identity.
 
 YouTube discovery uses hosted Codex web search through your existing login, followed by a bounded public YouTube oEmbed metadata check. No YouTube API key is needed. Search is an asynchronous job at `POST /api/v1/youtube/search`; poll its `jobId` through `/api/v1/jobs/:id`. Direct video URL/ID resolution works without Codex at `POST /api/v1/youtube/resolve`. Verified metadata is a candidate, not a playback guarantee; the visible IFrame reports actual playback or restrictions.
 

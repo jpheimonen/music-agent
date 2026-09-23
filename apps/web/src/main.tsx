@@ -609,7 +609,7 @@ function App() {
         const result = youtubeSearchResult.parse(state.result);
         if (!abort.signal.aborted && sourceRef.current === 'youtube') {
           setYoutubeResults(result.items);
-          setYoutubeSearchStatus(result.items.length ? `${result.items.length} videos found.` : 'No verified videos found. Try another search or paste a link.');
+          setYoutubeSearchStatus(result.items.length ? `${result.items.length} video${result.items.length === 1 ? "" : "s"} found.` : 'No verified videos found. Try another search or paste a link.');
         }
         return;
       }
@@ -746,293 +746,238 @@ function App() {
           </button>
         </div>
       )}
-      <main>
-        <div className="main-grid">
-          <section className="now-playing" aria-labelledby="now-heading">
-            <div className="section-label" id="now-heading">
-              NOW PLAYING
-            </div>
-            {isRadio(source) ? (
-              <>
-                <p className="state-line">
-                  {labels[source].toUpperCase()} ·{" "}
-                  {playback.status === "playing"
-                    ? "LIVE"
-                    : stationPending || playback.status === "loading"
-                      ? "CONNECTING"
-                      : stationError || playback.status === "failed"
-                        ? "UNAVAILABLE"
-                        : "STOPPED"}
-                </p>
-                <h1 className="track-title">{labels[source]}</h1>
-                <p className="subtle">
-                  {stationPending || playback.status === "loading"
-                    ? "Connecting to the live broadcast…"
-                    : playback.status === "playing"
-                      ? "Live radio"
-                      : "Stopped · Listen live to rejoin the broadcast."}
-                </p>
-                <div className="transport">
-                  <button
-                    className="primary-button"
-                    onClick={() =>
-                      stationPending ||
-                      playback.status === "playing" ||
-                      playback.status === "loading"
-                        ? stopRadio()
-                        : playback.status === "needsGesture"
-                          ? void player.resume()
-                          : void listenRadio()
-                    }
-                  >
-                    {stationPending ||
+      <main className="main-grid">
+        <section className="now-playing" aria-labelledby="now-heading">
+          <div className="section-label" id="now-heading">
+            NOW PLAYING
+          </div>
+          {isRadio(source) ? (
+            <>
+              <p className="state-line">
+                {labels[source].toUpperCase()} ·{" "}
+                {playback.status === "playing"
+                  ? "LIVE"
+                  : stationPending || playback.status === "loading"
+                    ? "CONNECTING"
+                    : stationError || playback.status === "failed"
+                      ? "UNAVAILABLE"
+                      : "STOPPED"}
+              </p>
+              <h1 className="track-title">{labels[source]}</h1>
+              <p className="subtle">
+                {stationPending || playback.status === "loading"
+                  ? "Connecting to the live broadcast…"
+                  : playback.status === "playing"
+                    ? "Live radio"
+                    : "Stopped · Listen live to rejoin the broadcast."}
+              </p>
+              <div className="transport">
+                <button
+                  className="primary-button"
+                  onClick={() =>
+                    stationPending ||
                     playback.status === "playing" ||
                     playback.status === "loading"
-                      ? "Stop"
+                      ? stopRadio()
                       : playback.status === "needsGesture"
-                        ? "Play"
-                        : "Listen live"}
-                  </button>
-                </div>
-                {stationError && (
-                  <p className="error-text" role="alert">
-                    Couldn’t connect to {labels[source]}: {stationError}{" "}
-                    <button
-                      className="inline-button"
-                      onClick={() => void listenRadio()}
-                    >
-                      Retry
-                    </button>
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                <p className="state-line">
-                  {labels[source].toUpperCase()} ·{" "}
-                  {playback.status === "needsGesture"
-                    ? "READY TO PLAY"
-                    : playback.status.toUpperCase()}
-                </p>
-                {source === "youtube" && current && (
-                  <div
-                    className="video-frame"
-                    ref={videoHost}
-                    aria-label="YouTube player"
-                  >
-                    <span>Press Play to load the video.</span>
-                  </div>
-                )}
-                <div className="track-identity">
-                  {current?.artwork && source === "local" ? (
-                    <img className="artwork" src={current.artwork} alt="" />
-                  ) : (
-                    <div className="artwork-fallback" aria-hidden="true">
-                      ♪
-                    </div>
-                  )}
-                  <div>
-                    <h1 className="track-title">
-                      {current?.title ||
-                        (source === "local"
-                          ? "Bring your collection"
-                          : "Choose a video")}
-                    </h1>
-                    <p className="artist-name">
-                      {current?.artist?.displayName ||
-                        (current
-                          ? "Artist unknown"
-                          : source === "local"
-                            ? "Your music, in one place."
-                            : "Paste a video link below to begin.")}
-                    </p>
-                    {current?.album && (
-                      <p className="subtle">{current.album}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="transport">
-                  <button
-                    className="primary-button"
-                    disabled={!current}
-                    onClick={() =>
-                      playback.status === "playing"
-                        ? player.pause()
-                        : current && void player.playOrResume(current)
-                    }
-                  >
-                    {playback.status === "playing" ? "Pause" : "Play"}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    disabled={!queue.length}
-                    onClick={() => {
-                      failedCandidates.current = 0;
-                      next();
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
-                {playback.duration !== null && playback.duration > 0 && (
-                  <div className="seek">
-                    <label htmlFor="seek">Position</label>
-                    <input
-                      id="seek"
-                      type="range"
-                      min="0"
-                      max={playback.duration}
-                      value={Math.min(playback.elapsed, playback.duration)}
-                      onChange={(event) =>
-                        player.seek(Number(event.target.value))
-                      }
-                    />
-                    <span>
-                      {formatTime(playback.elapsed)} /{" "}
-                      {formatTime(playback.duration)}
-                    </span>
-                  </div>
-                )}
-                {current && (
-                  <div className="reaction-row" aria-label="Your feedback">
-                    <button
-                      className={`reaction ${reaction === "like" ? "active" : ""}`}
-                      aria-pressed={reaction === "like"}
-                      disabled={feedbackBusy}
-                      onClick={() =>
-                        void saveReaction(
-                          current,
-                          reaction === "like" ? "neutral" : "like",
-                        )
-                      }
-                    >
-                      {reaction === "like" ? "♥ " : "♡ "}Like
-                    </button>
-                    <button
-                      className={`reaction ${reaction === "dislike" ? "active" : ""}`}
-                      aria-pressed={reaction === "dislike"}
-                      disabled={feedbackBusy}
-                      onClick={() =>
-                        void saveReaction(
-                          current,
-                          reaction === "dislike" ? "neutral" : "dislike",
-                        )
-                      }
-                    >
-                      {reaction === "dislike" ? "✕ " : "○ "}Dislike
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-            {(playback.error || playback.status === "needsGesture") && (
-              <p className="error-text" role="alert">
-                {playback.error || "Press Play to start listening."}
-              </p>
-            )}
-            {capability && capability.state !== "ready" && (
-              <p className="capability-note">
-                {capability.reason ||
-                  `${labels[source]} is ${capability.state.replace("_", " ")}.`}{" "}
-                {capability.state === "not_configured" && (
+                        ? void player.resume()
+                        : void listenRadio()
+                  }
+                >
+                  {stationPending ||
+                  playback.status === "playing" ||
+                  playback.status === "loading"
+                    ? "Stop"
+                    : playback.status === "needsGesture"
+                      ? "Play"
+                      : "Listen live"}
+                </button>
+              </div>
+              {stationError && (
+                <p className="error-text" role="alert">
+                  Couldn’t connect to {labels[source]}: {stationError}{" "}
                   <button
                     className="inline-button"
-                    onClick={(event) => openPanel("setup", event)}
-                  >
-                    Open setup
-                  </button>
-                )}
-              </p>
-            )}
-            <div className="volume">
-              <button
-                className="text-button"
-                aria-label={playback.muted ? "Unmute" : "Mute"}
-                onClick={() => player.toggleMute()}
-              >
-                {playback.muted ? "Unmute" : "Mute"}
-              </button>
-              <label htmlFor="volume">Volume</label>
-              <input
-                id="volume"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={playback.volume}
-                onChange={(event) =>
-                  player.setVolume(Number(event.target.value))
-                }
-              />
-            </div>
-            {feedbackNotice && (
-              <p className="feedback-note" role="status">
-                {feedbackNotice.title}: {feedbackNotice.text}{" "}
-                {feedbackNotice.retry && (
-                  <button
-                    className="inline-button"
-                    onClick={feedbackNotice.retry}
+                    onClick={() => void listenRadio()}
                   >
                     Retry
                   </button>
-                )}
-              </p>
-            )}
-          </section>
-          <aside className="artist-panel" aria-labelledby="artist-heading">
-            <div className="section-label">BEHIND THE MUSIC</div>
-            <h2 id="artist-heading">
-              {isRadio(source)
-                ? labels[source]
-                : current?.artist?.displayName || "An open page"}
-            </h2>
-            {isRadio(source) ? (
-              <p>
-                Current artist information isn’t available for this station.
-              </p>
-            ) : !current ? (
-              <p>Artist notes will appear here when you play a track.</p>
-            ) : !current.artist || current.artist.confidence === "low" ? (
-              <p>
-                Artist not identified. Notes are unavailable for this track.
-              </p>
-            ) : !artistData || artistData.status === "pending" ? (
-              <p>Preparing artist notes…</p>
-            ) : artistData.status === "cached" ? (
-              <>
-                <p>{artistData.introduction}</p>
-                {artistExpanded && artistData.text && (
-                  <p className="long-copy">{artistData.text}</p>
-                )}
-                {artistData.text && (
-                  <button
-                    className="inline-button"
-                    aria-expanded={artistExpanded}
-                    onClick={() => setArtistExpanded((value) => !value)}
-                  >
-                    {artistExpanded ? "Read less" : "Read more"}
-                  </button>
-                )}
-                <p className="provenance">
-                  AI-generated · Generated{" "}
-                  {artistData.generatedAt
-                    ? new Date(artistData.generatedAt).toLocaleDateString()
-                    : "recently"}{" "}
-                  · Cached
                 </p>
-              </>
-            ) : artistData.status === "unavailable" ? (
-              <p>Artist notes are unavailable for this artist.</p>
-            ) : (
-              <p>
-                Artist notes couldn’t load. Music is still available.{" "}
-                <button className="inline-button" onClick={() => void retryArtist()}>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="state-line">
+                {labels[source].toUpperCase()} ·{" "}
+                {playback.status === "needsGesture"
+                  ? "READY TO PLAY"
+                  : playback.status.toUpperCase()}
+              </p>
+              {source === "youtube" && current && (
+                <div
+                  className="video-frame"
+                  ref={videoHost}
+                  aria-label="YouTube player"
+                >
+                  <span>Press Play to load the video.</span>
+                </div>
+              )}
+              <div className="track-identity">
+                {current?.artwork && source === "local" ? (
+                  <img className="artwork" src={current.artwork} alt="" />
+                ) : (
+                  <div className="artwork-fallback" aria-hidden="true">
+                    ♪
+                  </div>
+                )}
+                <div>
+                  <h1 className="track-title">
+                    {current?.title ||
+                      (source === "local"
+                        ? "Bring your collection"
+                        : "Choose a video")}
+                  </h1>
+                  <p className="artist-name">
+                    {current?.artist?.displayName ||
+                      (current
+                        ? "Artist unknown"
+                        : source === "local"
+                          ? "Your music, in one place."
+                          : "Paste a video link below to begin.")}
+                  </p>
+                  {current?.album && (
+                    <p className="subtle">{current.album}</p>
+                  )}
+                </div>
+              </div>
+              <div className="transport">
+                <button
+                  className="primary-button"
+                  disabled={!current}
+                  onClick={() =>
+                    playback.status === "playing"
+                      ? player.pause()
+                      : current && void player.playOrResume(current)
+                  }
+                >
+                  {playback.status === "playing" ? "Pause" : "Play"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!queue.length}
+                  onClick={() => {
+                    failedCandidates.current = 0;
+                    next();
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+              {playback.duration !== null && playback.duration > 0 && (
+                <div className="seek">
+                  <label htmlFor="seek">Position</label>
+                  <input
+                    id="seek"
+                    type="range"
+                    min="0"
+                    max={playback.duration}
+                    value={Math.min(playback.elapsed, playback.duration)}
+                    onChange={(event) =>
+                      player.seek(Number(event.target.value))
+                    }
+                  />
+                  <span>
+                    {formatTime(playback.elapsed)} /{" "}
+                    {formatTime(playback.duration)}
+                  </span>
+                </div>
+              )}
+              {current && (
+                <div className="reaction-row" aria-label="Your feedback">
+                  <button
+                    className={`reaction ${reaction === "like" ? "active" : ""}`}
+                    aria-pressed={reaction === "like"}
+                    disabled={feedbackBusy}
+                    onClick={() =>
+                      void saveReaction(
+                        current,
+                        reaction === "like" ? "neutral" : "like",
+                      )
+                    }
+                  >
+                    {reaction === "like" ? "♥ " : "♡ "}Like
+                  </button>
+                  <button
+                    className={`reaction ${reaction === "dislike" ? "active" : ""}`}
+                    aria-pressed={reaction === "dislike"}
+                    disabled={feedbackBusy}
+                    onClick={() =>
+                      void saveReaction(
+                        current,
+                        reaction === "dislike" ? "neutral" : "dislike",
+                      )
+                    }
+                  >
+                    {reaction === "dislike" ? "✕ " : "○ "}Dislike
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          {(playback.error || playback.status === "needsGesture") && (
+            <p className="error-text" role="alert">
+              {playback.error || "Press Play to start listening."}
+            </p>
+          )}
+          {capability && capability.state !== "ready" && (
+            <p className="capability-note">
+              {capability.reason ||
+                `${labels[source]} is ${capability.state.replace("_", " ")}.`}{" "}
+              {capability.state === "not_configured" && (
+                <button
+                  className="inline-button"
+                  onClick={(event) => openPanel("setup", event)}
+                >
+                  Open setup
+                </button>
+              )}
+            </p>
+          )}
+          <div className="volume">
+            <button
+              className="text-button"
+              aria-label={playback.muted ? "Unmute" : "Mute"}
+              onClick={() => player.toggleMute()}
+            >
+              {playback.muted ? "Unmute" : "Mute"}
+            </button>
+            <label htmlFor="volume">Volume</label>
+            <input
+              id="volume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={playback.volume}
+              onChange={(event) =>
+                player.setVolume(Number(event.target.value))
+              }
+            />
+          </div>
+          {feedbackNotice && (
+            <p className="feedback-note" role="status">
+              {feedbackNotice.title}: {feedbackNotice.text}{" "}
+              {feedbackNotice.retry && (
+                <button
+                  className="inline-button"
+                  onClick={feedbackNotice.retry}
+                >
                   Retry
                 </button>
-              </p>
-            )}
-          </aside>
-        </div>
+              )}
+            </p>
+          )}
+        </section>
         {!isRadio(source) && (
           <>
             <section className="queue-section" aria-labelledby="queue-heading">
@@ -1319,6 +1264,59 @@ function App() {
             </section>
           </>
         )}
+        <aside className="artist-panel" aria-labelledby="artist-heading">
+          <div className="section-label">BEHIND THE MUSIC</div>
+          <h2 id="artist-heading">
+            {isRadio(source)
+              ? labels[source]
+              : current?.artist?.displayName || "An open page"}
+          </h2>
+          {isRadio(source) ? (
+            <p>
+              Current artist information isn’t available for this station.
+            </p>
+          ) : !current ? (
+            <p>Artist notes will appear here when you play a track.</p>
+          ) : !current.artist || current.artist.confidence === "low" ? (
+            <p>
+              Artist not identified. Notes are unavailable for this track.
+            </p>
+          ) : !artistData || artistData.status === "pending" ? (
+            <p>Preparing artist notes…</p>
+          ) : artistData.status === "cached" ? (
+            <>
+              <p>{artistData.introduction}</p>
+              {artistExpanded && artistData.text && (
+                <p className="long-copy">{artistData.text}</p>
+              )}
+              {artistData.text && (
+                <button
+                  className="inline-button"
+                  aria-expanded={artistExpanded}
+                  onClick={() => setArtistExpanded((value) => !value)}
+                >
+                  {artistExpanded ? "Read less" : "Read more"}
+                </button>
+              )}
+              <p className="provenance">
+                AI-generated · Generated{" "}
+                {artistData.generatedAt
+                  ? new Date(artistData.generatedAt).toLocaleDateString()
+                  : "recently"}{" "}
+                · Cached
+              </p>
+            </>
+          ) : artistData.status === "unavailable" ? (
+            <p>Artist notes are unavailable for this artist.</p>
+          ) : (
+            <p>
+              Artist notes couldn’t load. Music is still available.{" "}
+              <button className="inline-button" onClick={() => void retryArtist()}>
+                Retry
+              </button>
+            </p>
+          )}
+        </aside>
       </main>
       {panel && (
         <dialog
