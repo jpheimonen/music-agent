@@ -208,7 +208,7 @@ export class PlaybackController {
       return;
     }
     const audio = new Audio(
-      `/api/v1/media/local/${encodeURIComponent(item.id.slice(6))}`,
+      `/api/v1/media/local/${encodeURIComponent(item.id)}`,
     );
     this.audio = audio;
     this.activeKind = "audio";
