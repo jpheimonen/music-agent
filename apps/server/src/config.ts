@@ -6,6 +6,8 @@ const envSchema = z.object({
   MUSIC_LIBRARY_ROOT: z.string().optional(),
   MUSIC_DATA_DIR: z.string().default('./data'),
   YOUTUBE_DATA_API_KEY: z.string().optional(),
+  MUSIC_CODEX_HOME: z.string().optional(),
+  MUSIC_CODEX_BIN: z.string().optional(),
   MUSIC_STATION_KEXP_URL: z.string().url().optional(),
   MUSIC_STATION_YLE1_URL: z.string().url().optional(),
   MUSIC_STATION_RADIO_HELSINKI_URL: z.string().url().optional(),
@@ -17,6 +19,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     const value = parsed[key];
     if (value && (new URL(value).protocol !== 'https:' || new URL(value).username || new URL(value).password)) throw new Error(`${key} must be credential-free HTTPS`);
   }
-  return { port: parsed.MUSIC_PORT, libraryRoot: parsed.MUSIC_LIBRARY_ROOT, dataDir: resolve(parsed.MUSIC_DATA_DIR), youtubeKey: parsed.YOUTUBE_DATA_API_KEY, youtubeConfigured: Boolean(parsed.YOUTUBE_DATA_API_KEY), stationOverrides: { kexp: parsed.MUSIC_STATION_KEXP_URL, yle1: parsed.MUSIC_STATION_YLE1_URL, 'radio-helsinki': parsed.MUSIC_STATION_RADIO_HELSINKI_URL } };
+  return { port: parsed.MUSIC_PORT, libraryRoot: parsed.MUSIC_LIBRARY_ROOT, dataDir: resolve(parsed.MUSIC_DATA_DIR), codexHome: resolve(parsed.MUSIC_CODEX_HOME ?? resolve(parsed.MUSIC_DATA_DIR, 'codex-home')), codexBin: parsed.MUSIC_CODEX_BIN, youtubeKey: parsed.YOUTUBE_DATA_API_KEY, youtubeConfigured: Boolean(parsed.YOUTUBE_DATA_API_KEY), stationOverrides: { kexp: parsed.MUSIC_STATION_KEXP_URL, yle1: parsed.MUSIC_STATION_YLE1_URL, 'radio-helsinki': parsed.MUSIC_STATION_RADIO_HELSINKI_URL } };
 }
 export type Config = ReturnType<typeof loadConfig>;
