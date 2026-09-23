@@ -81,6 +81,7 @@ export class PlaybackController {
   private timeout: number | null = null;
   private onEnded: (() => void) | null = null;
   private activeKind: "audio" | "youtube" | null = null;
+  private activeItemId: string | null = null;
   private lockRelease: (() => void) | null = null;
   private lockHeld = false;
 
@@ -148,6 +149,7 @@ export class PlaybackController {
     }
     this.lockRelease?.();
     this.activeKind = null;
+    this.activeItemId = null;
     this.update({
       epoch,
       status: "stopped",
@@ -212,6 +214,7 @@ export class PlaybackController {
     );
     this.audio = audio;
     this.activeKind = "audio";
+    this.activeItemId = item.id;
     audio.volume = this.state.volume;
     audio.muted = this.state.muted;
     this.audioEvents(audio, epoch);
@@ -321,6 +324,7 @@ export class PlaybackController {
       return;
     }
     this.activeKind = "youtube";
+    this.activeItemId = item.id;
     this.pendingVideo = item.id.slice(8);
     this.update({ status: "loading" });
     if (this.youtubeHost) await this.mountYoutube(this.pendingVideo, epoch);
@@ -400,6 +404,16 @@ export class PlaybackController {
       this.youtube.playVideo();
       this.update({ status: "loading" });
     }
+  }
+  async playOrResume(item: MediaItem) {
+    const resumable =
+      this.activeItemId === item.id &&
+      (this.state.status === "paused" || this.state.status === "needsGesture") &&
+      ((item.source === "local" && this.activeKind === "audio" && this.audio) ||
+        (item.source === "youtube" && this.activeKind === "youtube" && this.youtube));
+    if (resumable) return this.resume();
+    if (item.source === "local") return this.playLocal(item);
+    if (item.source === "youtube") return this.playYoutube(item);
   }
   pause() {
     if (this.activeKind === "audio") this.audio?.pause();
