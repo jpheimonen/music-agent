@@ -1,6 +1,6 @@
 # Music
 
-Local TypeScript music app. Media and taste services are available; the player interface and Codex DJ are being integrated separately. The setup page and `/api/v1/capabilities` report unavailable features explicitly.
+Local TypeScript music app with a browser player, media and taste services, and a Codex DJ. The setup page and `/api/v1/capabilities` report unavailable features explicitly.
 
 ## Run
 

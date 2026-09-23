@@ -594,6 +594,7 @@ function App() {
           body: JSON.stringify({
             reaction: intended,
             expectedRevision: revision,
+            media: item,
           }),
         },
       );
@@ -1286,7 +1287,9 @@ function App() {
               </p>
               <h3>Codex DJ and artist notes</h3>
               <p>
-                Run <code>codex login</code> locally, then restart the server.
+                Log in with the pinned Codex CLI using this app’s private
+                <code> CODEX_HOME</code> under <code>MUSIC_DATA_DIR/codex-home</code>,
+                then restart the server. See the README for the exact command.
                 Selected taste and metadata are sent to the configured Codex
                 service; account plan limits apply. {cap?.codex.reason}
               </p>

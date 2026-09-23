@@ -64,6 +64,7 @@ test('starting a new local item stops and detaches the previous element', async 
   const player = new PlaybackController();
   await player.playLocal(local('a'));
   const first = FakeAudio.instances[0];
+  assert.equal(first.src, `/api/v1/media/local/${encodeURIComponent(local('a').id)}`);
   assert.equal(player.snapshot().status, 'playing');
   await player.playLocal(local('b'));
   assert.equal(first.paused, true);
