@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && cp src/codex-worker.mjs dist/codex-worker.mjs",
+    "build": "tsc -p tsconfig.json && cp src/codex-worker.mjs src/search-evidence.mjs dist/",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "npm run build && node --test test/*.test.mjs"

@@ -8,6 +8,7 @@ import {
   jobAccepted,
   job,
   recommendationResult,
+  youtubeSearchResult,
   taste,
   feedbackResponse,
   artistInfo,
@@ -89,6 +90,12 @@ function App() {
   const [libraryError, setLibraryError] = useState("");
   const [scanStatus, setScanStatus] = useState("");
   const [youtubeInput, setYoutubeInput] = useState("");
+  const [youtubeQuery, setYoutubeQuery] = useState("");
+  const [youtubeResults, setYoutubeResults] = useState<MediaItem[]>([]);
+  const [youtubeSearchStatus, setYoutubeSearchStatus] = useState("");
+  const [youtubeSearching, setYoutubeSearching] = useState(false);
+  const youtubeSearchAbort = useRef<AbortController | null>(null);
+  const youtubeSearchJob = useRef<string | null>(null);
   const videoRequest = useRef(0);
   const [resolved, setResolved] = useState<MediaItem | null>(null);
   const [resolveStatus, setResolveStatus] = useState("");
@@ -177,6 +184,11 @@ function App() {
   const changeSource = (next: Source) => {
     if (next === sourceRef.current) return;
     cancelJob();
+    youtubeSearchAbort.current?.abort();
+    if (youtubeSearchJob.current) void fetch(`/api/v1/jobs/${youtubeSearchJob.current}`, {method:'DELETE'}).catch(() => {});
+    youtubeSearchAbort.current = null;
+    youtubeSearchJob.current = null;
+    setYoutubeSearching(false);
     epoch.current++;
     waitingForContinuation.current = false;
     stationRequest.current++;
@@ -572,6 +584,39 @@ function App() {
       }
     } catch (error) {
       if (request === videoRequest.current) setResolveStatus(message(error));
+    }
+  };
+  const searchYoutube = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const query = youtubeQuery.trim();
+    if (!query || youtubeSearchAbort.current) return;
+    const abort = new AbortController();
+    youtubeSearchAbort.current = abort;
+    setYoutubeSearching(true);
+    setYoutubeSearchStatus('Searching with Codex…');
+    setYoutubeResults([]);
+    try {
+      const accepted = await api('/youtube/search',jobAccepted,{...json({q:query}),signal:abort.signal});
+      youtubeSearchJob.current = accepted.jobId;
+      for (;;) {
+        await new Promise<void>((resolve,reject) => {
+          const timer=window.setTimeout(resolve,1300);
+          abort.signal.addEventListener('abort',() => {clearTimeout(timer);reject(new Error('Cancelled'));},{once:true});
+        });
+        const state = await api(`/jobs/${accepted.jobId}`,job,{signal:abort.signal});
+        if (state.status === 'failed' || state.status === 'cancelled') throw new Error(state.error?.message || 'YouTube discovery is temporarily unavailable. Paste a link to keep listening.');
+        if (state.status !== 'succeeded') continue;
+        const result = youtubeSearchResult.parse(state.result);
+        if (!abort.signal.aborted && sourceRef.current === 'youtube') {
+          setYoutubeResults(result.items);
+          setYoutubeSearchStatus(result.items.length ? `${result.items.length} videos found.` : 'No verified videos found. Try another search or paste a link.');
+        }
+        return;
+      }
+    } catch (error) {
+      if (!abort.signal.aborted) setYoutubeSearchStatus(`${message(error)} Paste a link to keep listening.`);
+    } finally {
+      if (youtubeSearchAbort.current === abort) { youtubeSearchAbort.current=null; youtubeSearchJob.current=null; setYoutubeSearching(false); }
     }
   };
   const saveReaction = async (
@@ -1206,9 +1251,23 @@ function App() {
               ) : (
                 <>
                   <p className="subtle">
-                    Paste a YouTube URL or video ID. Discovery requires separate
-                    setup; direct videos can still work.
+                    Search with Codex using your existing login, or paste a YouTube link. No API key needed.
                   </p>
+                  <form className="youtube-form" onSubmit={searchYoutube}>
+                    <label htmlFor="youtube-query">Search YouTube</label>
+                    <div>
+                      <input id="youtube-query" value={youtubeQuery} onChange={(event) => setYoutubeQuery(event.target.value)} maxLength={200} required placeholder="Artist, song, or mood" />
+                      <button className="secondary-button" disabled={cap?.codex.state !== 'ready' || youtubeSearching}>Search</button>
+                    </div>
+                  </form>
+                  {youtubeSearchStatus && <p role="status">{youtubeSearchStatus}</p>}
+                  {youtubeResults.map((item) => <div className="resolved-item" key={item.id}>
+                    <div><strong>{item.title}</strong><span>{item.attribution || 'YouTube'}</span></div>
+                    <div className="row-actions">
+                      <button className="inline-button" onClick={() => choose(item)}>Play now</button>
+                      <button className="inline-button" onClick={() => addQueue(item)}>Add to queue</button>
+                    </div>
+                  </div>)}
                   <form className="youtube-form" onSubmit={resolveVideo}>
                     <label htmlFor="youtube-link">Video URL or ID</label>
                     <div>
@@ -1252,8 +1311,7 @@ function App() {
                   {cap?.youtubeDiscovery.state !== "ready" && (
                     <p className="capability-note">
                       DJ discovery:{" "}
-                      {cap?.youtubeDiscovery.reason || "setup required"}. Direct
-                      video entry remains available.
+                      {cap?.youtubeDiscovery.reason || "Your existing Codex login is unavailable"}. Paste a link to keep listening.
                     </p>
                   )}
                 </>
@@ -1297,8 +1355,7 @@ function App() {
               </p>
               <h3>YouTube</h3>
               <p>
-                Set <code>YOUTUBE_DATA_API_KEY</code> for DJ discovery. Direct
-                URL playback uses the visible YouTube player.{" "}
+                No YouTube API key needed. DJ search uses Codex with your existing login. Direct URL playback uses the visible YouTube player.{" "}
                 {cap?.youtubeDiscovery.reason}
               </p>
               <h3>Stations</h3>
