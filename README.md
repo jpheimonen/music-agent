@@ -14,7 +14,7 @@ npm start
 
 Open http://127.0.0.1:8787. The server binds loopback only and serves the built frontend and API from one origin. For development, run `npm run dev`, then open http://127.0.0.1:5173; Vite proxies `/api` to the backend. `npm run typecheck` checks all workspaces.
 
-Set environment values before starting. `.env.example` lists them without credentials. `MUSIC_LIBRARY_ROOT` must be absolute. `MUSIC_DATA_DIR` defaults to `./data`; do not expose it publicly. The YouTube key is read server-side only. Optional station endpoint overrides must be credential-free HTTPS.
+Set environment values before starting. `.env.example` lists them without credentials. `MUSIC_LIBRARY_ROOT` must be absolute. `MUSIC_DATA_DIR` defaults to the repository's `data/` directory; relative `MUSIC_DATA_DIR` and `MUSIC_CODEX_HOME` overrides are resolved from the repository root even when npm starts the server in its workspace. Do not expose the data directory publicly. The YouTube key is read server-side only. Optional station endpoint overrides must be credential-free HTTPS.
 
 The browser uses `/api/v1`. JSON API errors include a stable code and request ID. No CORS is enabled. Requests are limited to local Host and same-origin mutation Origin. Jobs are in-memory and cancellation is best effort; feature workers will attach bounded operations. A server restart does not resume a job.
 
@@ -28,7 +28,7 @@ For YouTube discovery, enable YouTube Data API v3 in a Google Cloud project and 
 
 ## Taste data
 
-`MUSIC_DATA_DIR` (default `./data`, resolved from the server working directory) contains the authoritative `likes.csv`, `dislikes.csv`, and `musical_taste.md`. Keep this directory private and back it up as a unit. The CSV files are UTF-8 RFC4180 with header `schema_version,media_id,source,title,artist,recorded_at`, schema version `1`, one row per media ID, and UTC ISO8601 timestamps. A media ID appears in at most one file. `musical_taste.md` has YAML-like front matter with `schema_version`, `summary_revision`, `based_on_feedback_revision`, and `generated_at`. Its body is derived narrative; the CSVs are the explicit feedback facts.
+`MUSIC_DATA_DIR` (default repository-root `data/`) contains the authoritative `likes.csv`, `dislikes.csv`, and `musical_taste.md`. Keep this directory private and back it up as a unit. The CSV files are UTF-8 RFC4180 with header `schema_version,media_id,source,title,artist,recorded_at`, schema version `1`, one row per media ID, and UTC ISO8601 timestamps. A media ID appears in at most one file. `musical_taste.md` has YAML-like front matter with `schema_version`, `summary_revision`, `based_on_feedback_revision`, and `generated_at`. Its body is derived narrative; the CSVs are the explicit feedback facts.
 
 The server also writes `taste-manifest.json` (revisions, hashes, retry receipts), `taste-pending.json` during a commit, and `.taste.lock` while running. Only one server process may use the directory. Reactions are immediately durable and increment the feedback revision; summary synthesis has a separate revision and can lag. The internal `TasteRepository.commitSummary` operation rejects generated text based on stale feedback or summary revisions. Codex must never write these files directly.
 
@@ -38,14 +38,14 @@ On startup, a valid pending journal is replayed before requests are served. A cr
 
 ## Codex DJ setup
 
-Install the pinned `codex-cli 0.156.1` on `PATH` (or set `MUSIC_CODEX_BIN` to its absolute binary path). The server includes `@openai/codex-sdk` 0.156.1. It creates a private Codex home at `MUSIC_DATA_DIR/codex-home` unless `MUSIC_CODEX_HOME` is set. Start the server once to create that home and its minimal configuration; `setup_required` is expected. Then stop it and authenticate this exact home through the official CLI flow:
+`npm ci` installs the pinned `codex-cli 0.156.1` alongside `@openai/codex-sdk` 0.156.1; an external pinned CLI on `PATH` or an absolute `MUSIC_CODEX_BIN` path also works. The server resolves the native runtime behind the npm CLI shim and checks its version. It creates a private Codex home at `MUSIC_DATA_DIR/codex-home` unless `MUSIC_CODEX_HOME` is set. Start the server once to create that home and its minimal configuration; `setup_required` is expected. Then stop it and authenticate this exact home through the official CLI flow from the repository root:
 
 ```sh
-CODEX_HOME="$(pwd)/data/codex-home" codex login
-CODEX_HOME="$(pwd)/data/codex-home" codex login status
+CODEX_HOME="$(pwd)/data/codex-home" ./node_modules/.bin/codex login
+CODEX_HOME="$(pwd)/data/codex-home" ./node_modules/.bin/codex login status
 ```
 
-Use the same resolved `MUSIC_DATA_DIR` in both commands if it differs from `./data`. A ChatGPT account with Codex access, network connectivity, and available plan usage is required. The app does not collect login tokens. Do not copy a personal Codex home into this one: the app accepts only its minimal `config.toml` and reports `unsafe_codex_config` if extra tools or settings are present. Selected taste and media metadata are sent to the Codex inference service. The server excludes `YOUTUBE_DATA_API_KEY` and unrelated environment variables from the Codex child process.
+If `MUSIC_DATA_DIR` or `MUSIC_CODEX_HOME` is overridden, use the resulting absolute Codex home in both commands. If `MUSIC_CODEX_BIN` is overridden, use that same pinned executable for login. A ChatGPT account with Codex access, network connectivity, and available plan usage is required. The app does not collect login tokens. Do not copy a personal Codex home into this one: the app accepts only its minimal `config.toml` and reports `unsafe_codex_config` if extra tools or settings are present. Selected taste and media metadata are sent to the Codex inference service. The server excludes `YOUTUBE_DATA_API_KEY` and unrelated environment variables from the Codex child process.
 
 At startup the server checks CLI version and runs a synthetic allowed/sibling file read against its restrictive permission profile. Failed checks disable AI routes while manual media and feedback remain usable. `GET /api/v1/capabilities` reports Codex and YouTube discovery separately. A later login expiry or usage limit may still fail a job. The profile check establishes only the tested filesystem boundary on this Linux host; it does not prove complete process confinement.
 
