@@ -1289,11 +1289,11 @@ function App() {
               </p>
               <h3>Codex DJ and artist notes</h3>
               <p>
-                Log in with the pinned Codex CLI using this app’s private
-                <code> CODEX_HOME</code> under <code>MUSIC_DATA_DIR/codex-home</code>,
-                then restart the server. See the README for the exact command.
-                Selected taste and metadata are sent to the configured Codex
-                service; account plan limits apply. {cap?.codex.reason}
+                Uses your existing Codex CLI login. The server selected{" "}
+                <code>{cap?.codex.authHomeSource === "user_home" ? "~/.codex" : cap?.codex.authHomeSource || "your Codex home"}</code>.
+                If that session is unavailable, check your usual Codex login and
+                restart the server. Selected taste and metadata are sent to the
+                Codex service; account plan limits apply. {cap?.codex.reason}
               </p>
               <h3>YouTube</h3>
               <p>

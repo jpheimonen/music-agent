@@ -2,15 +2,10 @@ import { Codex } from '@openai/codex-sdk';
 
 process.on('message', async job => {
   try {
-    const configOverrides = [
-      'default_permissions="music_agent"',
-      `permissions.music_agent.filesystem={":root"="deny",":minimal"="read",${JSON.stringify(job.scratch)}="read",${JSON.stringify(job.runtime)}="read"}`,
-      'permissions.music_agent.network={"*"="deny"}',
-    ];
     const codex = new Codex({
       codexPathOverride: job.binary,
-      env: { PATH: job.path, HOME: job.home, CODEX_HOME: job.codexHome },
-      configOverrides,
+      env: job.env,
+      configOverrides: job.configOverrides,
     });
     const thread = codex.startThread({ workingDirectory: job.scratch, skipGitRepoCheck: true, approvalPolicy: 'never', webSearchMode: 'disabled' });
     const result = await thread.run(job.prompt, { outputSchema: job.schema });
