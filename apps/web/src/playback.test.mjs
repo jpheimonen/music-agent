@@ -90,6 +90,34 @@ test('station stop detaches audio and late live events cannot revive it', async 
   player.dispose();
 });
 
+test('primary play restarts a retained local item after teardown and resumes a pause', async () => {
+  const player = new PlaybackController();
+  const item = local('a');
+  await player.playOrResume(item);
+  const first = FakeAudio.instances[0];
+  player.pause();
+  assert.equal(player.snapshot().status, 'paused');
+  await player.playOrResume(item);
+  assert.equal(FakeAudio.instances.length, 1, 'pause uses the existing element');
+  player.stop(); // Source return, queue exhaustion, or a new controller on reload.
+  await player.playOrResume(item);
+  assert.equal(FakeAudio.instances.length, 2);
+  assert.equal(FakeAudio.instances[1].paused, false);
+  assert.equal(first.src, '');
+  FakeAudio.instances[1].emit('error');
+  assert.equal(player.snapshot().status, 'failed');
+  await player.playOrResume(item);
+  assert.equal(FakeAudio.instances.length, 3, 'retry replaces the failed element');
+  player.dispose();
+
+  const reloaded = new PlaybackController();
+  assert.equal(reloaded.snapshot().status, 'stopped');
+  assert.equal(FakeAudio.instances.length, 3, 'reloading alone must not autoplay');
+  await reloaded.playOrResume(item);
+  assert.equal(FakeAudio.instances.length, 4);
+  reloaded.dispose();
+});
+
 test('YouTube state callbacks from a destroyed iframe are ignored', async () => {
   let callback;
   let destroyed = false;
@@ -123,5 +151,33 @@ test('YouTube state callbacks from a destroyed iframe are ignored', async () => 
   callback({ data: 1 });
   assert.equal(destroyed, true);
   assert.equal(player.snapshot().status, 'stopped');
+  player.dispose();
+});
+
+test('primary play remounts a retained YouTube item after source return', async () => {
+  let mounts = 0;
+  globalThis.document = { createElement: () => ({}) };
+  globalThis.location = { origin: 'http://localhost' };
+  window.YT = { Player: class {
+    constructor(_element, options) { mounts++; options.events.onReady(); }
+    playVideo() {}
+    pauseVideo() {}
+    stopVideo() {}
+    destroy() {}
+    setVolume() {}
+    mute() {}
+    unMute() {}
+    getCurrentTime() { return 0; }
+    getDuration() { return 10; }
+    seekTo() {}
+  } };
+  const player = new PlaybackController();
+  player.setYoutubeHost({ replaceChildren() {}, append() {} });
+  const item = { id: 'youtube:abcdefghijk', source: 'youtube', title: 'Video', artist: null, availability: 'available' };
+  await player.playOrResume(item);
+  assert.equal(mounts, 1);
+  player.stop();
+  await player.playOrResume(item);
+  assert.equal(mounts, 2);
   player.dispose();
 });

@@ -645,6 +645,8 @@ function App() {
       ? pendingReaction.value
       : tasteData?.feedback[current.id] || "neutral"
     : "neutral";
+  const summaryUnavailable =
+    tasteData?.summaryStatus === "pending" && cap?.codex.state !== "ready";
 
   return (
     <div className="app-shell">
@@ -811,7 +813,7 @@ function App() {
                     onClick={() =>
                       playback.status === "playing"
                         ? player.pause()
-                        : void player.resume()
+                        : current && void player.playOrResume(current)
                     }
                   >
                     {playback.status === "playing" ? "Pause" : "Play"}
@@ -1325,9 +1327,21 @@ function App() {
                 <>
                   <p>
                     Feedback revision {tasteData.feedbackRevision} · Summary{" "}
-                    {tasteData.summaryStatus}
+                    {summaryUnavailable ? "unavailable" : tasteData.summaryStatus}
                   </p>
-                  {tasteData.summaryStatus === "pending" && (
+                  {summaryUnavailable ? (
+                    <p>
+                      Feedback is saved. Taste summary needs Codex to become
+                      available. Configure it in{" "}
+                      <button
+                        className="inline-button"
+                        onClick={() => setPanel("setup")}
+                      >
+                        Setup
+                      </button>
+                      , then check again.
+                    </p>
+                  ) : tasteData.summaryStatus === "pending" && (
                     <p>Feedback saved. Taste summary is updating.</p>
                   )}
                   {tasteData.summaryStatus === "failed" && (
