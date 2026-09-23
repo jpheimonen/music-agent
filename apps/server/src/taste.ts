@@ -216,6 +216,13 @@ export class TasteRepository {
     const summaryStatus = this.synthesis === 'failed' ? 'failed' : this.synthesis === 'pending' || manifest.basedOnFeedbackRevision !== manifest.feedbackRevision ? 'pending' : 'current';
     return { feedbackRevision: manifest.feedbackRevision, summaryRevision: manifest.summaryRevision, summaryStatus, summaryMarkdown: manifest.summaryRevision ? files['musical_taste.md'].replace(/^---\n[\s\S]*?\n---\n/, '') : null, feedback };
   }
+  agentContext(limit = 40) {
+    const entries = [
+      ...[...this.state.likes.values()].map(row => ({ ...row, reaction: 'like' as const })),
+      ...[...this.state.dislikes.values()].map(row => ({ ...row, reaction: 'dislike' as const })),
+    ];
+    return entries.sort((a,b) => b.recordedAt.localeCompare(a.recordedAt)).slice(0,limit).map(({mediaId,source,title,artist,reaction}) => ({mediaId,source,title:title.slice(0,120),artist:artist.slice(0,100),reaction}));
+  }
   setSynthesisStatus(status: 'idle' | 'pending' | 'failed') { this.synthesis = status; }
   async react(input: { mediaId: string; reaction: z.infer<typeof reaction>; expectedRevision: number; idempotencyKey: string; media?: MediaItem }) {
     return this.serialize(async () => {
