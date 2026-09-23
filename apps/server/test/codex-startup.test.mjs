@@ -1,34 +1,76 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { userInfo } from 'node:os';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CodexRunner } from '../dist/codex.js';
+import { CodexRunner, executionOverrides } from '../dist/codex.js';
 import { loadConfig } from '../dist/config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const require = createRequire(import.meta.url);
 
-test('default and relative data paths follow the repository root under npm workspace cwd', () => {
+test('existing Codex home selection and relative data paths follow the documented order', () => {
   assert.equal(loadConfig({}).dataDir, join(repositoryRoot, 'data'));
-  assert.equal(loadConfig({}).codexHome, join(repositoryRoot, 'data', 'codex-home'));
+  assert.equal(loadConfig({}).codexHome, join(userInfo().homedir, '.codex'));
+  assert.equal(loadConfig({ CODEX_HOME: '/tmp/existing-codex' }).codexHome, '/tmp/existing-codex');
+  assert.equal(loadConfig({ CODEX_HOME: '/tmp/existing-codex', MUSIC_CODEX_HOME: './custom-home' }).codexHome, join(repositoryRoot, 'custom-home'));
   assert.equal(loadConfig({ MUSIC_DATA_DIR: './private', MUSIC_CODEX_HOME: './custom-home' }).codexHome, join(repositoryRoot, 'custom-home'));
-  assert.equal(loadConfig({ MUSIC_DATA_DIR: './private' }).codexHome, join(repositoryRoot, 'private', 'codex-home'));
 });
 
-test('npm PATH, explicit CLI shim, and native override pass the real boundary before setup_required', { skip: process.platform !== 'linux', timeout: 60000 }, async () => {
+test('nontrivial personal config is preserved and disabled integrations receive explicit overrides', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'music-codex-config-'));
+  try {
+    const source = 'model="gpt-5"\nnotify=["/bin/false"]\n[mcp_servers.private_tool]\ncommand="/bin/false"\n[profiles.other.mcp_servers.another_tool]\ncommand="/bin/false"\n';
+    await writeFile(join(base, 'config.toml'), source);
+    const overrides = await executionOverrides(base, join(base, 'scratch'), join(base, 'runtime'));
+    assert.ok(overrides.includes('mcp_servers.private_tool.enabled=false'));
+    assert.ok(!overrides.includes('mcp_servers.another_tool.enabled=false'), 'inactive profiles are not applied');
+    for (const required of ['notify=[]', 'features.shell_tool=false', 'features.apps=false', 'features.plugins=false', 'features.hooks=false', 'project_doc_max_bytes=0']) assert.ok(overrides.includes(required));
+    assert.equal(await readFile(join(base, 'config.toml'), 'utf8'), source);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('pinned CLI sees a configured MCP server as disabled without rewriting config', { skip: process.platform !== 'linux' }, async () => {
+  const base = await mkdtemp(join(tmpdir(), 'music-codex-effective-'));
+  try {
+    const home = join(base, 'home');
+    const allowed = join(base, 'allowed');
+    await mkdir(home); await mkdir(allowed);
+    await writeFile(join(allowed, 'music-instructions.txt'), 'Return only requested JSON. Do not use tools.\n');
+    const source = 'model="gpt-5"\nnotify=["/bin/false"]\n[mcp_servers.synthetic]\ncommand="/bin/false"\nargs=[]\n';
+    await writeFile(join(home, 'config.toml'), source);
+    const native = await realpath(join(dirname(require.resolve(`@openai/codex-linux-${process.arch}/package.json`)), 'vendor', process.arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl', 'bin', 'codex'));
+    const overrides = await executionOverrides(home, allowed, dirname(dirname(native)));
+    const result = spawnSync(native, [...overrides.flatMap(value => ['-c', value]), 'mcp', 'list', '--json'], {
+      cwd: allowed, env: { PATH: process.env.PATH, HOME: userInfo().homedir, CODEX_HOME: home }, encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(result.status, 0, 'pinned CLI accepts the per-invocation configuration');
+    const servers = JSON.parse(result.stdout);
+    assert.equal(servers.find(server => server.name === 'synthetic')?.enabled, false);
+    assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), source);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('npm PATH, explicit CLI shim, and native override pass the real boundary before existing-login status', { skip: process.platform !== 'linux', timeout: 60000 }, async () => {
   const base = await mkdtemp(join(tmpdir(), 'music-codex-startup-'));
   try {
     const shim = await realpath(require.resolve('@openai/codex/bin/codex.js'));
     const native = await realpath(join(dirname(require.resolve(`@openai/codex-linux-${process.arch}/package.json`)), 'vendor', process.arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl', 'bin', 'codex'));
     for (const [label, override] of [['npm PATH', undefined], ['explicit shim', shim], ['explicit native', native]]) {
-      const config = loadConfig({ MUSIC_DATA_DIR: join(base, label.replace(' ', '-')), MUSIC_CODEX_BIN: override });
+      const home = join(base, label.replace(' ', '-'), 'existing-codex');
+      await mkdir(home, { recursive: true });
+      const original = 'model="gpt-5"\n[mcp_servers.synthetic]\ncommand="/bin/false"\n';
+      await writeFile(join(home, 'config.toml'), original);
+      const config = loadConfig({ MUSIC_DATA_DIR: join(base, label.replace(' ', '-')), MUSIC_CODEX_HOME: home, MUSIC_CODEX_BIN: override });
       const runner = await CodexRunner.create(config);
       assert.equal(runner.binary, native, `${label}: resolved native binary`);
       assert.equal(runner.runtime, dirname(dirname(native)), `${label}: minimal native runtime grant`);
-      assert.deepEqual(runner.capability, { state: 'not_configured', reason: 'setup_required' }, `${label}: boundary passed before isolated login check`);
+      assert.deepEqual(runner.capability, { state: 'not_configured', reason: 'setup_required', authHomeSource: 'MUSIC_CODEX_HOME' }, `${label}: boundary passed before existing-login check`);
+      assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), original);
     }
   } finally {
     await rm(base, { recursive: true, force: true });
