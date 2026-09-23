@@ -58,3 +58,22 @@ test('artist generation coalesces and persists a reusable cache record', async (
     assert.equal((await restarted.artist('unknown')).status,'unavailable');
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
+
+test('YouTube DJ ranks only verified members, excludes current dislikes, and rejects stale feedback', async () => {
+  const video = {id:'youtube:jt43N-PhrVc',source:'youtube',title:'Verified video',artist:null,availability:'available'};
+  const calls=[];
+  let completeSelection;
+  const runner={run(kind,input) { calls.push({kind,input});
+    if(kind==='discoverYoutube') return Promise.resolve({candidates:[{videoId:'jt43N-PhrVc',canonicalWatchUrl:'https://www.youtube.com/watch?v=jt43N-PhrVc',searchResultUrl:'https://www.youtube.com/watch?v=jt43N-PhrVc',searchEventId:'event-1',eventQuery:null,resultTitle:'Search title',whyRelevant:'Jazz'}]});
+    return new Promise(resolve => { completeSelection=resolve; });
+  }};
+  const taste={revision:1,snapshot(){return {feedbackRevision:this.revision,summaryRevision:1,summaryMarkdown:'Jazz',feedback:{},summaryStatus:'current'};},agentContext(){return [];}};
+  const youtube={async verifyBatch(){return [{media:video,evidence:{schemaVersion:1,method:'codex_web_search',runtimeVersion:'0.156.1',searchEventId:'event-1',eventQuery:null,searchResultUrl:'https://www.youtube.com/watch?v=jt43N-PhrVc',canonicalWatchUrl:'https://www.youtube.com/watch?v=jt43N-PhrVc',verifiedTitle:'Verified video',verifiedAt:new Date().toISOString(),verificationMethod:'youtube_oembed'}}];}};
+  const service=new DjService(runner,{},{...youtube},taste,'/tmp');
+  const pending=service.recommend({...request,source:'youtube'});
+  while(!completeSelection) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.find(call=>call.kind==='selectCandidates').input.candidates.map(item=>item.id),[video.id]);
+  taste.revision++;
+  completeSelection({selections:[{id:video.id,reason:'Grounded'}]});
+  await assert.rejects(pending,error=>error.code==='revision_conflict');
+});

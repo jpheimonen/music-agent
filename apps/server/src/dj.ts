@@ -5,7 +5,7 @@ import { recommendationRequest, recommendationResult, artistInfo, type MediaItem
 import { CodexRunner, CodexError } from './codex.js';
 import { LibraryService } from './library.js';
 import { TasteRepository, TasteError } from './taste.js';
-import { YoutubeService } from './youtube.js';
+import { YoutubeService, type VerifiedCandidate } from './youtube.js';
 
 const clean = (value: string) => value.slice(0, 500).replace(/[\u0000-\u001f]/g, ' ');
 export class DjService {
@@ -23,12 +23,13 @@ export class DjService {
   }
   async recommend(raw: unknown, signal?: AbortSignal) {
     const request = recommendationRequest.parse(raw);
-    const boundedSignal = AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(120_000)]);
+    const boundedSignal = AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(request.source === 'youtube' ? 180_000 : 120_000)]);
     if (request.seedId && !request.seedId.startsWith(`${request.source}:`)) throw new CodexError('invalid_request',false);
     const snapshot = this.taste.snapshot();
     const feedback = this.taste.agentContext();
     const excluded = new Set([...request.queuedIds, ...request.recentIds, ...(request.seedId ? [request.seedId] : []), ...Object.entries(snapshot.feedback).filter(([,v]) => v === 'dislike').map(([id]) => id)]);
     let candidates: MediaItem[] = [];
+    let verified: VerifiedCandidate[] = [];
     if (request.source === 'local') {
       const plan = await this.codex.run('planDiscovery', { source:'local', taste:snapshot.summaryMarkdown?.slice(0,6000) ?? null, feedback, seedId:request.seedId, direction:request.direction?.slice(0,500) }, boundedSignal);
       for (const query of plan.queries) {
@@ -37,19 +38,16 @@ export class DjService {
       }
       if (!candidates.length) candidates = this.library.page('',0,100).items.filter(item => item.availability === 'available' && !excluded.has(item.id));
     } else {
-      const plan = await this.codex.run('planDiscovery', { source:'youtube', taste:snapshot.summaryMarkdown?.slice(0,6000) ?? null, feedback, seedId:request.seedId, direction:request.direction?.slice(0,500) }, boundedSignal);
-      for (const query of plan.queries) {
-        if (boundedSignal.aborted) throw new CodexError(signal?.aborted ? 'cancelled' : 'deadline_exceeded', false);
-        const page = await this.youtube.search(query, 10, boundedSignal);
-        candidates.push(...page.items.filter(item => !excluded.has(item.id)));
-      }
+      const discovered = await this.codex.run('discoverYoutube', { source:'youtube', taste:snapshot.summaryMarkdown?.slice(0,6000) ?? null, feedback, seedId:request.seedId, direction:request.direction?.slice(0,500), excludedIds:[...excluded].filter(id => id.startsWith('youtube:')).slice(0,100) }, boundedSignal);
+      verified = await this.youtube.verifyBatch(discovered.candidates,request.sessionId,boundedSignal);
+      candidates.push(...verified.map(entry => entry.media).filter(item => !excluded.has(item.id)));
     }
     candidates = [...new Map(candidates.map(item => [item.id, item])).values()].slice(0,50);
     if (!candidates.length) {
       const latest = this.taste.snapshot();
       if (boundedSignal.aborted) throw new CodexError(signal?.aborted ? 'cancelled' : 'deadline_exceeded', false);
       if (latest.feedbackRevision !== snapshot.feedbackRevision || latest.summaryRevision !== snapshot.summaryRevision) throw new TasteError('revision_conflict','Taste changed during discovery.');
-      return recommendationResult.parse({ sessionId:request.sessionId, modeEpoch:request.modeEpoch, source:request.source, feedbackRevision:snapshot.feedbackRevision, summaryRevision:snapshot.summaryRevision, items:[] });
+      return recommendationResult.parse({ sessionId:request.sessionId, modeEpoch:request.modeEpoch, source:request.source, feedbackRevision:snapshot.feedbackRevision, summaryRevision:snapshot.summaryRevision, items:[], ...(request.source === 'youtube' ? {emptyReason:'no_verified_candidates'} : {}) });
     }
     const selected = await this.codex.run('selectCandidates', { source:request.source, taste:snapshot.summaryMarkdown?.slice(0,6000) ?? null, feedback, direction:request.direction?.slice(0,500), candidates:candidates.map(item => ({id:item.id,title:clean(item.title).slice(0,180),artist:item.artist?.displayName.slice(0,180) ?? null})) }, boundedSignal);
     if (boundedSignal.aborted) throw new CodexError(signal?.aborted ? 'cancelled' : 'deadline_exceeded', false);
@@ -62,7 +60,15 @@ export class DjService {
       if (!media || media.source !== request.source || ids.has(entry.id) || latest.feedback[entry.id] === 'dislike') throw new CodexError('invalid_agent_output', false);
       ids.add(entry.id); return { media, reason:entry.reason };
     });
-    return recommendationResult.parse({ sessionId:request.sessionId, modeEpoch:request.modeEpoch, source:request.source, feedbackRevision:snapshot.feedbackRevision, summaryRevision:snapshot.summaryRevision, items });
+    const result = recommendationResult.parse({ sessionId:request.sessionId, modeEpoch:request.modeEpoch, source:request.source, feedbackRevision:snapshot.feedbackRevision, summaryRevision:snapshot.summaryRevision, items });
+    return request.source === 'youtube' ? { ...result, discoveryEvidence:verified.filter(entry => ids.has(entry.media.id)).map(entry => ({mediaId:entry.media.id,...entry.evidence})) } : result;
+  }
+  async searchYoutube(query: string, signal?: AbortSignal) {
+    const boundedSignal = AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(180_000)]);
+    const discovered = await this.codex.run('discoverYoutube',{ source:'youtube', requestedQuery:query.slice(0,200) },boundedSignal);
+    const verified = await this.youtube.verifyBatch(discovered.candidates,`search:${query}`,boundedSignal,query);
+    if (boundedSignal.aborted) throw new CodexError(signal?.aborted ? 'cancelled' : 'deadline_exceeded',false);
+    return {items:verified.map(entry => entry.media),nextPageToken:null, ...(verified.length ? {} : {emptyReason:'no_verified_candidates'}), discoveryEvidence:verified.map(entry => ({mediaId:entry.media.id,...entry.evidence}))};
   }
   private knownArtist(key: string) {
     for (let cursor = 0; cursor < 500; cursor += 100) {

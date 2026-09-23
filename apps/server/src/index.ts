@@ -18,7 +18,7 @@ const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.heade
 const jobs = new JobRegistry();
 const library = new LibraryService(config.libraryRoot, config.dataDir);
 await library.initialize();
-const youtube = new YoutubeService(config.youtubeKey);
+const youtube = new YoutubeService();
 const tasteRepository = await TasteRepository.open(config.dataDir);
 const codex = await CodexRunner.create(config);
 const dj = new DjService(codex, library, youtube, tasteRepository, config.dataDir);
@@ -43,7 +43,7 @@ if (tasteRepository.snapshot().summaryStatus === 'pending') scheduleSynthesis();
 const capabilitySnapshot = (): Capabilities => capabilities.parse({
   library: library.state,
   codex: { ...codex.capability, synthesisStatus: codex.capability.state === 'ready' ? tasteRepository.snapshot().summaryStatus : 'unavailable' },
-  youtubeDiscovery: config.youtubeConfigured ? { state: 'ready' } : { state: 'not_configured', reason: 'Set YOUTUBE_DATA_API_KEY.' },
+  youtubeDiscovery: codex.discoveryCapability.state === 'ready' && youtube.failure ? {state:'unavailable',reason:youtube.failure} : codex.discoveryCapability,
   youtubeEmbed: { state: 'ready' },
   stations: { kexp: { state: 'ready' }, yle1: { state: 'ready' }, 'radio-helsinki': { state: 'ready' } },
 });
@@ -96,9 +96,11 @@ app.post('/api/v1/youtube/resolve', async request => {
   let id: string; try { id = parseVideoId(input); } catch { throw new LibraryError('invalid_youtube_url', 400); }
   return youtubeItem(id);
 });
-app.get('/api/v1/youtube/search', async request => {
-  const { q, maxResults } = youtubeSearchQuery.parse(request.query);
-  return youtube.search(q, maxResults, request.raw.aborted ? AbortSignal.abort() : undefined);
+app.post('/api/v1/youtube/search', async (request, reply) => {
+  const { q } = youtubeSearchQuery.parse(request.body);
+  if (!codex.canAttemptDiscovery) return reply.code(503).send(fail(codex.discoveryCapability.reason ?? 'provider_unavailable','YouTube discovery is unavailable. Paste a link to keep listening.',503,request.id).body);
+  const searchJob = jobs.start('youtubeSearch', signal => dj.searchYoutube(q,signal));
+  return reply.code(202).send({jobId:searchJob.id});
 });
 app.get('/api/v1/taste', async (request) => {
   const query = z.object({ mediaIds: z.string().optional() }).parse(request.query);
@@ -125,8 +127,8 @@ app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
 });
 app.post('/api/v1/dj/recommendations', async (request, reply) => {
   const input = recommendationRequest.parse(request.body);
-  if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Set up Codex login.', 503, request.id).body);
-  if (input.source === 'youtube' && !config.youtubeConfigured) return reply.code(503).send(fail('setup_required', 'Set YOUTUBE_DATA_API_KEY for YouTube discovery.', 503, request.id).body);
+  if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Your existing Codex login is unavailable.', 503, request.id).body);
+  if (input.source === 'youtube' && !codex.canAttemptDiscovery) return reply.code(503).send(fail(codex.discoveryCapability.reason ?? 'provider_unavailable', 'YouTube discovery is unavailable. Paste a link to keep listening.',503,request.id).body);
   const previous = sessionJobs.get(input.sessionId);
   if (previous) jobs.cancel(previous);
   const job = jobs.start('recommendations', signal => dj.recommend(input, signal));
@@ -147,7 +149,7 @@ app.get('/api/v1/artists/:key/info', async request => {
 });
 app.post('/api/v1/artists/:key/info/refresh', async (request, reply) => {
   const { key } = z.object({ key:z.string().min(1).max(200) }).parse(request.params);
-  if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Set up Codex login.', 503, request.id).body);
+  if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Your existing Codex login is unavailable.', 503, request.id).body);
   const current = await dj.artist(key);
   if (!dj.hasArtist(key)) return reply.code(404).send(fail('identity_uncertain','Artist identity is unavailable.',404,request.id).body);
   const job = jobs.start('describeArtist', signal => dj.describeArtist(key, signal, true));
