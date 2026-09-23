@@ -1,0 +1,19 @@
+{
+  "name": "music-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @music/server & npm run dev -w @music/web & wait",
+    "build": "npm run build -w @music/contracts && npm run build -w @music/server && npm run build -w @music/web",
+    "typecheck": "npm run typecheck --workspaces",
+    "start": "npm run start -w @music/server"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}
