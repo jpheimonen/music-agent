@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The change only adjusts styling and changes no documented behavior, commands or settings.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The build already passed on the final change during the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": true,
+    "reason": "Work pass 1 did not check the light theme or widths between 640px and 960px, and both affect the sticky buttons.",
+    "command": "taiga runner browser \"Hard reload http://127.0.0.1:50581. At 800x800, scroll the page down 1200px and report whether the 01 YouTube, 02 Your collection and 03 Live radio buttons stay at the top of the viewport, with content passing cleanly underneath and nothing overlapping them. Then switch the app to its light theme and repeat this at 800x800 and at desktop 1280x800, where the right-hand stage area is what scrolls. Take a screenshot of each case.\""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "A CSS-only change cannot affect the server or adapter test suites.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "The change has no security-relevant surface.",
+    "command": ""
+  }
+]
