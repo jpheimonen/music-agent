@@ -267,6 +267,11 @@ pre {
 }
 .stage .mode-switch {
   justify-self: start;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  /* Covers the gap above so content never shows over the buttons. */
+  box-shadow: 0 -12px 0 var(--paper);
 }
 /* Cards carry printer's crop marks at their corners instead of soft
    shadows. */
@@ -1641,14 +1646,15 @@ dialog::backdrop {
   .stage .mode-switch {
     display: grid;
     justify-self: stretch;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, 1fr);
   }
   .mode-switch button {
-    border-right: 0;
-    border-bottom: 2px solid var(--ink);
-  }
-  .mode-switch button:last-child {
-    border-bottom: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px;
+    min-height: 48px;
+    font-size: 12px;
   }
   .ask {
     flex-wrap: wrap;
