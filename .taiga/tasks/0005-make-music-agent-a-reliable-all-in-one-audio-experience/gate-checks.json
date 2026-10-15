@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The README and .env.example were already updated in the change; I will confirm this during review.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The shipped build already passed in the fast checks on the final commit.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Recent muted browser runs already cover the journey on essentially the final code: YouTube audio through the proxy, thumbs-down, switching sources, radio, the interview and the phone layout. The only later commit changed a prompt line.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The saved server and web suites are the project's whole test set, and both passed in the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "The change adds running yt-dlp as a process, downloading the binary, proxying remote media and writing files.",
+    "command": ""
+  }
+]
