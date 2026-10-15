@@ -139,6 +139,8 @@ app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
   const body = feedbackRequest.parse(request.body);
   const key = request.headers['idempotency-key'];
   if (typeof key !== 'string') return reply.code(400).send(fail('invalid_request', 'Idempotency-Key header is required.', 400, request.id).body);
+  const radio = id.startsWith('radio:');
+  if (radio ? body.media || (body.reaction !== 'neutral' && !body.radioSong) : body.radioSong) return reply.code(400).send(fail('invalid_request', radio ? 'A radio song reaction needs radioSong, not media.' : 'radioSong is only for radio song IDs.', 400, request.id).body);
   if (body.radioSong && radioSongId(body.radioSong) !== id) return reply.code(400).send(fail('invalid_request', 'The radio song does not match its ID.', 400, request.id).body);
   try { const result = await tasteRepository.react({ mediaId: id, ...body, idempotencyKey: key }); scheduleSynthesis(); return result; }
   catch (error) {
