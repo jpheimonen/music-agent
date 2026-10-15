@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "The README may need a short note that the app can be installed and has a service worker.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The full build already passed on the final checkout during the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "The evaluator already ran the built app and checked the manifest, service worker, installability and title changes. If I change sw.js during review, I will re-check it myself.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "No shared or server code changed, and the web adapter tests already passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "No authentication, input handling, dependency or server change. The service worker only handles same-origin navigations.",
+    "command": ""
+  }
+]
