@@ -13,7 +13,7 @@ const schemas = {
   planDiscovery: z.object({ queries: z.array(z.string().trim().min(2).max(100)).min(1).max(3) }).strict(),
   selectCandidates: z.object({ selections: z.array(z.object({ id: z.string(), reason: z.string().trim().min(1).max(300) }).strict()).max(5) }).strict(),
   describeArtist: z.object({ introduction: z.string().trim().min(1).max(500), text: z.string().trim().min(1).max(3000) }).strict(),
-  pickTracks: z.object({ picks: z.array(z.object({ artist: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(300) }).strict()).max(12) }).strict(),
+  pickTracks: z.object({ picks: z.array(z.object({ artist: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(300) }).strict()).max(16) }).strict(),
   // Arrays are capped after parsing, so a chatty answer is trimmed rather than lost.
   converse: z.object({ reply: z.string().trim().min(1).max(2000), notesToAdd: z.array(z.string().trim().min(1).max(300)).max(10), noteIdsToRemove: z.array(z.string()).max(20), steer: z.string().trim().max(300).nullable(), suggestions: z.array(z.string().trim().min(1).max(120)).max(8), interviewDone: z.boolean() }).strict(),
 };

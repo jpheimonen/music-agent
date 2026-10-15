@@ -68,15 +68,16 @@ export class DjService {
     });
   }
   // The DJ names tracks; each is then looked up on YouTube and kept only if it
-  // can be streamed. A quick first batch stops at three so music starts sooner.
+  // can be streamed. A quick first batch stops at three so music starts sooner;
+  // a normal batch keeps up to ten so Up next stays long.
   private async pickYoutube(request: RecommendationRequest, taste: string | null, feedback: unknown, excluded: Set<string>, signal: AbortSignal) {
     const recentTracks = (request.recentTracks ?? []).map(track => ({ title:clean(track.title).slice(0,150), artist:track.artist ? clean(track.artist).slice(0,100) : null }));
     const listener = this.listenerContext();
-    const { picks } = await this.codex.run('pickTracks', { count:request.quick ? 5 : 8, direction:request.direction?.slice(0,500) ?? null, taste:taste?.slice(0,6000) ?? null, feedback, ...listener, recentTracks }, signal, { quick:request.quick });
+    const { picks } = await this.codex.run('pickTracks', { count:request.quick ? 5 : 14, direction:request.direction?.slice(0,500) ?? null, taste:taste?.slice(0,6000) ?? null, feedback, ...listener, recentTracks }, signal, { quick:request.quick });
     // Songs played in recent sessions are not repeated either.
     const heard = new Set([...recentTracks, ...this.memory.recentPlays(60)].map(track => songKey(track.artist, track.title)));
     const fresh = picks.filter(pick => { const key = songKey(pick.artist, pick.title); if (heard.has(key)) return false; heard.add(key); return true; });
-    const wanted = request.quick ? 3 : 5;
+    const wanted = request.quick ? 3 : 10;
     const found: { order: number; media: MediaItem; reason: string }[] = [];
     const taken = new Set(excluded);
     const enough = new AbortController();
