@@ -7,13 +7,13 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { JobRegistry } from './jobs.js';
-import { capabilities, stationId, mediaId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, djMessageRequest, listeningEvent, type Capabilities } from '@music/contracts';
+import { capabilities, stationId, mediaId, feedbackId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, djMessageRequest, listeningEvent, type Capabilities } from '@music/contracts';
 import { LibraryService, LibraryError, parseRange } from './library.js';
 import { stationDescriptors, resolveStation } from './stations.js';
 import { StationNowPlayingService } from './station-now-playing.js';
 import { YoutubeService, YoutubeProviderError, parseVideoId, youtubeItem } from './youtube.js';
 import { YtDlp } from './ytdlp.js';
-import { TasteRepository, TasteError } from './taste.js';
+import { TasteRepository, TasteError, radioSongId } from './taste.js';
 import { CodexRunner } from './codex.js';
 import { DjService } from './dj.js';
 import { DjMemory } from './memory.js';
@@ -131,14 +131,17 @@ app.get('/api/v1/taste', async (request) => {
   const query = z.object({ mediaIds: z.string().optional() }).parse(request.query);
   const ids = query.mediaIds?.split(',').filter(Boolean);
   if (ids && ids.length > 100) throw new z.ZodError([]);
-  ids?.forEach(id => mediaId.parse(id));
+  ids?.forEach(id => feedbackId.parse(id));
   return tasteRepository.snapshot(ids);
 });
 app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
-  const { mediaId: id } = z.object({ mediaId }).parse(request.params);
+  const { mediaId: id } = z.object({ mediaId: feedbackId }).parse(request.params);
   const body = feedbackRequest.parse(request.body);
   const key = request.headers['idempotency-key'];
   if (typeof key !== 'string') return reply.code(400).send(fail('invalid_request', 'Idempotency-Key header is required.', 400, request.id).body);
+  const radio = id.startsWith('radio:');
+  if (radio ? body.media || (body.reaction !== 'neutral' && !body.radioSong) : body.radioSong) return reply.code(400).send(fail('invalid_request', radio ? 'A radio song reaction needs radioSong, not media.' : 'radioSong is only for radio song IDs.', 400, request.id).body);
+  if (body.radioSong && radioSongId(body.radioSong) !== id) return reply.code(400).send(fail('invalid_request', 'The radio song does not match its ID.', 400, request.id).body);
   try { const result = await tasteRepository.react({ mediaId: id, ...body, idempotencyKey: key }); scheduleSynthesis(); return result; }
   catch (error) {
     if (error instanceof TasteError) {
@@ -205,7 +208,11 @@ app.post('/api/v1/artists/:key/info/refresh', async (request, reply) => {
 app.get('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.get(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.delete('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.cancel(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.get('/api/v1/stations', async () => stationDescriptors());
-app.get('/api/v1/stations/:id/now-playing', async request => stationMetadata.get(stationId.parse((request.params as {id:string}).id)));
+app.get('/api/v1/stations/:id/now-playing', async request => {
+  const data = await stationMetadata.get(stationId.parse((request.params as {id:string}).id));
+  // A current song carries the ID its likes are saved under.
+  return data.status === 'current' && data.kind === 'track' ? { ...data, songId: radioSongId(data) } : data;
+});
 app.post('/api/v1/stations/:id/resolve', async request => resolveStation(config, stationId.parse((request.params as {id:string}).id)));
 app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/')) return reply.code(404).send(fail('not_found', 'API route not found.', 404, request.id).body); return reply.code(404).send('Not found'); });
 const webDist = resolve(import.meta.dirname, '../../web/dist');

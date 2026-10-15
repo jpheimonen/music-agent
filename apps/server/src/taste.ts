@@ -3,17 +3,21 @@ import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { mediaId, reaction, type MediaItem } from '@music/contracts';
+import { feedbackId, reaction, type MediaItem, type RadioSong } from '@music/contracts';
 
 const names = ['likes.csv', 'dislikes.csv', 'musical_taste.md'] as const;
 type Name = typeof names[number];
 const header = 'schema_version,media_id,source,title,artist,recorded_at\r\n';
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const sources = ['local', 'youtube', 'radio'] as const;
+const normalized = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+// Stations differ in case and spacing, so those don't make a new song.
+export const radioSongId = (song: RadioSong) => `radio:${digest(`${normalized(song.artist ?? '')}\n${normalized(song.title)}`)}`;
 const manifestSchema = z.object({ schemaVersion: z.literal(1), feedbackRevision: z.number().int().nonnegative(), summaryRevision: z.number().int().nonnegative(), basedOnFeedbackRevision: z.number().int().nonnegative().nullable(), hashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)), receipts: z.record(z.string(), z.object({ fingerprint: z.string(), mediaId: z.string(), reaction, feedbackRevision: z.number().int().nonnegative() })) });
 type Manifest = z.infer<typeof manifestSchema>;
 const journalSchema = z.object({ id: z.string().uuid(), base: manifestSchema, next: manifestSchema, after: z.record(z.string(), z.string()) });
 type Journal = z.infer<typeof journalSchema>;
-type Row = { mediaId: string; source: 'local' | 'youtube'; title: string; artist: string; recordedAt: string };
+type Row = { mediaId: string; source: 'local' | 'youtube' | 'radio'; title: string; artist: string; recordedAt: string };
 type State = { manifest: Manifest; files: Record<Name, string>; likes: Map<string, Row>; dislikes: Map<string, Row> };
 
 export class TasteError extends Error {
@@ -47,8 +51,8 @@ function parseCsv(input: string): Map<string, Row> {
   for (const cells of rows) {
     if (cells.length !== 6 || cells[0] !== '1') throw new Error('Unsupported CSV row');
     const [, id, source, title, artist, recordedAt] = cells;
-    mediaId.parse(id);
-    if (!['local', 'youtube'].includes(source) || !id.startsWith(`${source}:`) || !title || !Number.isFinite(Date.parse(recordedAt)) || new Date(recordedAt).toISOString() !== recordedAt) throw new Error('Invalid CSV row');
+    feedbackId.parse(id);
+    if (!(sources as readonly string[]).includes(source) || !id.startsWith(`${source}:`) || !title || !Number.isFinite(Date.parse(recordedAt)) || new Date(recordedAt).toISOString() !== recordedAt) throw new Error('Invalid CSV row');
     if (found.has(id)) throw new Error('Duplicate feedback media ID');
     found.set(id, { mediaId: id, source: source as Row['source'], title, artist, recordedAt });
   }
@@ -224,11 +228,11 @@ export class TasteRepository {
     return entries.sort((a,b) => b.recordedAt.localeCompare(a.recordedAt)).slice(0,limit).map(({mediaId,source,title,artist,reaction}) => ({mediaId,source,title:title.slice(0,120),artist:artist.slice(0,100),reaction}));
   }
   setSynthesisStatus(status: 'idle' | 'pending' | 'failed') { this.synthesis = status; }
-  async react(input: { mediaId: string; reaction: z.infer<typeof reaction>; expectedRevision: number; idempotencyKey: string; media?: MediaItem }) {
+  async react(input: { mediaId: string; reaction: z.infer<typeof reaction>; expectedRevision: number; idempotencyKey: string; media?: MediaItem; radioSong?: RadioSong }) {
     return this.serialize(async () => {
-      mediaId.parse(input.mediaId); reaction.parse(input.reaction);
+      feedbackId.parse(input.mediaId); reaction.parse(input.reaction);
       if (!/^[A-Za-z0-9_-]{8,128}$/.test(input.idempotencyKey)) throw new Error('Invalid idempotency key');
-      const fingerprint = digest(JSON.stringify({ mediaId: input.mediaId, reaction: input.reaction, expectedRevision: input.expectedRevision, media: input.media ?? null }));
+      const fingerprint = digest(JSON.stringify({ mediaId: input.mediaId, reaction: input.reaction, expectedRevision: input.expectedRevision, media: input.media ?? null, radioSong: input.radioSong ?? null }));
       const receipt = this.state.manifest.receipts[input.idempotencyKey];
       if (receipt) {
         if (receipt.fingerprint !== fingerprint) throw new TasteError('revision_conflict', 'Idempotency key was used for a different reaction.');
@@ -240,8 +244,13 @@ export class TasteRepository {
       const previous = likes.get(input.mediaId) ?? dislikes.get(input.mediaId);
       likes.delete(input.mediaId); dislikes.delete(input.mediaId);
       if (input.reaction !== 'neutral') {
-        if (input.media && (input.media.id !== input.mediaId || input.media.source !== input.mediaId.split(':')[0])) throw new Error('Media identity mismatch');
-        const row: Row = { mediaId: input.mediaId, source: input.mediaId.startsWith('local:') ? 'local' : 'youtube', title: input.media?.title ?? previous?.title ?? input.mediaId, artist: input.media?.artist?.displayName ?? previous?.artist ?? '', recordedAt: new Date().toISOString() };
+        const source = input.mediaId.split(':')[0] as Row['source'];
+        if (input.media && (input.media.id !== input.mediaId || input.media.source !== source)) throw new Error('Media identity mismatch');
+        if (input.radioSong && radioSongId(input.radioSong) !== input.mediaId) throw new Error('Radio song identity mismatch');
+        const described = input.media ? { title: input.media.title, artist: input.media.artist?.displayName ?? '' } : input.radioSong ? { title: input.radioSong.title, artist: input.radioSong.artist ?? '' } : null;
+        // A radio song has no other record of its name, so it must arrive with it.
+        if (source === 'radio' && !described && !previous) throw new Error('A radio song reaction needs the song title');
+        const row: Row = { mediaId: input.mediaId, source, title: described?.title ?? previous?.title ?? input.mediaId, artist: described?.artist ?? previous?.artist ?? '', recordedAt: new Date().toISOString() };
         (input.reaction === 'like' ? likes : dislikes).set(input.mediaId, row);
       }
       const files = { ...this.state.files, 'likes.csv': writeCsv(likes), 'dislikes.csv': writeCsv(dislikes) };
