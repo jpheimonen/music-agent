@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "The README was updated, but project knowledge and memory may still say the sandbox blocks the DJ and point to the AppArmor fix. I will check those once the other checks have run.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The build passed on the final commit cffe7a4 during the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Work pass 1 already ran the final code against the real codex 0.156.1. Capabilities reported ready, a real DJ job returned 2 picks and a muted Setup check showed no sandbox message. Repeating it would add nothing.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The fast checks already ran the full server and web adapter suites, and both passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "The only security-relevant change is giving Codex full access, which the user explicitly chose. A scanner would just flag that choice, and the change adds no dependencies or input handling.",
+    "command": ""
+  }
+]

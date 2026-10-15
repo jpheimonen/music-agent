@@ -50,12 +50,6 @@ const suggestions = [
 
 // Server and job errors arrive as stable codes. People see a sentence.
 const reasonText: Record<string, string> = {
-  codex_sandbox_blocked:
-    "This computer blocks the sandbox Codex runs in, so the DJ is switched off to keep your files private. A one-time setup step fixes it.",
-  codex_boundary_allowed_failed:
-    "Codex's sandbox check failed, so the DJ is switched off to keep your files private.",
-  codex_boundary_forbidden_failed:
-    "Codex's sandbox let a test read a file it shouldn't, so the DJ is switched off to keep your files private.",
   setup_required:
     "The DJ needs your Codex login. Sign in with your usual Codex CLI, then restart the server.",
   provider_auth_failed:
@@ -1555,24 +1549,6 @@ function App() {
                   ? "Ready. The DJ uses your existing Codex login."
                   : describeReason(cap?.codex.reason) || "Checking Codex…"}
               </p>
-              {cap?.codex.reason === "codex_sandbox_blocked" && (
-                <>
-                  <p>
-                    Ubuntu 24.04 and later block the user namespaces that
-                    Codex's sandbox (bubblewrap) needs. Your own Codex CLI hits
-                    the same limit. Load the bubblewrap AppArmor profile once,
-                    as the Codex documentation recommends, then restart this
-                    server:
-                  </p>
-                  <pre>
-                    <code>
-                      {`sudo apt install apparmor-profiles apparmor-utils
-sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
-sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict`}
-                    </code>
-                  </pre>
-                </>
-              )}
               <p className="subtle">
                 Uses the Codex login in{" "}
                 <code>

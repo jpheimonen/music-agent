@@ -4,8 +4,8 @@ Environment: Ubuntu host, music-agent with a web UI (`apps/web/dist`) and a Code
 
 ## Codex bubblewrap sandbox is blocked on this host
 - On this Ubuntu host the Codex bubblewrap sandbox cannot start: `kernel.apparmor_restrict_unprivileged_userns=1` and there is no `bwrap` AppArmor profile.
-- Consequence: the startup boundary check reports `codex_sandbox_blocked`, and the real Codex DJ cannot be tested end to end without the user applying the `sudo` AppArmor fix described in the README.
-- `features.use_legacy_landlock` does not help — it panics with read-restricted profiles. Don't reach for it as a workaround.
+- Since commit cffe7a4, by the owner's choice, music jobs run Codex with `danger-full-access` and the startup sandbox check is gone, so the real DJ works here without any sudo or AppArmor fix. Don't reintroduce a sandbox probe or the `music_agent` permission profile.
+- `features.use_legacy_landlock` does not help — it panics with read-restricted profiles.
 
 ## Testing the DJ UI without the real Codex
 - To exercise the DJ UI while Codex is blocked, use a throwaway Node mock that serves `apps/web/dist` and fakes `/api/v1/capabilities`, `/dj/recommendations`, and `/jobs/:id`. This lets the UI be driven without a working Codex backend.

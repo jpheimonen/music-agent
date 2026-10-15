@@ -31,7 +31,7 @@ test('cancelling an active synthetic CLI reaps its descendant before releasing t
   await writeFile(fakeCli,script,{mode:0o700});
   const config = loadConfig({ MUSIC_DATA_DIR:dir, MUSIC_CODEX_HOME:join(dir,'home') });
   const runner = new CodexRunner(config);
-  runner.capability.state='ready'; runner.binary=fakeCli; runner.runtime=dir;
+  runner.capability.state='ready'; runner.binary=fakeCli;
   const abort = new AbortController();
   try {
     const pending = runner.run('synthesizeTaste',{synthetic:true},abort.signal);
