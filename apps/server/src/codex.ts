@@ -86,16 +86,10 @@ export function modelOverrides(catalog: unknown, configuredModel: unknown) {
   const [preferred] = listed;
   return [`model=${JSON.stringify(preferred.slug)}`, ...(typeof preferred.default_reasoning_level === 'string' ? [`model_reasoning_effort=${JSON.stringify(preferred.default_reasoning_level)}`] : [])];
 }
-// A small catalog model answers in seconds where the default takes about half
-// a minute. Quick jobs use it at low effort, or the default model at low effort
-// when the catalog has no small model.
+// Quick jobs use the same model as the rest of the DJ, at low effort, so they
+// answer in seconds rather than about half a minute.
 export function quickModelOverrides(catalog: unknown, configuredModel: unknown) {
-  const models = (table(catalog).models ?? []) as CatalogModel[];
-  const small = models.filter(model => model.visibility === 'list' && typeof model.slug === 'string' && /luna|mini|nano|flash|lite/i.test(model.slug)).sort((a, b) => Number(a.priority) - Number(b.priority))[0];
-  if (!small) return [...modelOverrides(catalog, configuredModel).filter(value => !value.startsWith('model_reasoning_effort=')), 'model_reasoning_effort="low"'];
-  const levels = Array.isArray(small.supported_reasoning_levels) ? small.supported_reasoning_levels.map(level => table(level).effort ?? level) : ['low'];
-  const effort = levels.includes('low') ? 'low' : small.default_reasoning_level;
-  return [`model=${JSON.stringify(small.slug)}`, ...(typeof effort === 'string' ? [`model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+  return [...modelOverrides(catalog, configuredModel).filter(value => !value.startsWith('model_reasoning_effort=')), 'model_reasoning_effort="low"'];
 }
 type ConfigTable = Record<string, unknown>;
 const table = (value: unknown): ConfigTable => value && typeof value === 'object' && !Array.isArray(value) ? value as ConfigTable : {};
