@@ -46,6 +46,9 @@ import "@fontsource-variable/archivo/wdth-italic.css";
 import "@fontsource/silkscreen/latin-400.css";
 import "./style.css";
 
+// Ask the DJ for more songs when Up next holds fewer than this.
+const LOW_QUEUE = 5;
+
 type Theme = "system" | "light" | "dark";
 // A song heard on the radio, with the ID the server gave it.
 type RadioPick = { id: string; title: string; radioSong: RadioSong };
@@ -210,6 +213,7 @@ function App() {
       setDjPending(true);
       setDjError("");
       const current = nowRef.current?.kind === "track" ? nowRef.current.media : null;
+      let topUp = false;
       try {
         const payload = {
           sessionId: requestSession,
@@ -248,6 +252,7 @@ function App() {
           if (!picks.length) throw new Error("The DJ didn't find anything new this time. Try asking for something different.");
           updateQueue((entries) => [...entries, ...picks.map((item) => ({ media: item.media, origin: "DJ pick" as const, reason: item.reason }))]);
           setAnnouncement(`The DJ queued ${picks.length} pick${picks.length === 1 ? "" : "s"}`);
+          topUp = quick;
           if (switchOnEpoch.current === requestEpoch) {
             switchOnEpoch.current = -1;
             nextRef.current();
@@ -262,6 +267,8 @@ function App() {
           jobId.current = null;
           setDjPending(false);
         }
+        // The quick first batch is short so music starts fast; fill Up next right after it.
+        if (topUp && !abort.signal.aborted && epoch.current === requestEpoch && session.current === requestSession) void requestPicks(requestSession, requestEpoch);
       }
     },
     [updateQueue],
@@ -313,7 +320,7 @@ function App() {
     const [first, ...rest] = queueRef.current;
     updateQueue(rest);
     choose(first.media, first.origin, first.reason, true);
-    if (djRef.current && rest.length < 2 && !jobAbort.current) void requestPicks(session.current, epoch.current);
+    if (djRef.current && rest.length < LOW_QUEUE && !jobAbort.current) void requestPicks(session.current, epoch.current);
   }, [choose, player, requestPicks, updateQueue]);
   const nextRef = useRef(next);
   nextRef.current = next;
@@ -618,7 +625,7 @@ function App() {
     if (await saveReaction(item, "dislike")) setToast({ text: `Disliked “${item.title}”. The DJ won’t pick it again.`, action: { label: "Undo", run: undoDislike(item) } });
   };
   const refillIfLow = () => {
-    if (djRef.current && queueRef.current.length < 2 && !jobAbort.current && nowRef.current?.kind !== "station") void requestPicks(session.current, epoch.current);
+    if (djRef.current && queueRef.current.length < LOW_QUEUE && !jobAbort.current && nowRef.current?.kind !== "station") void requestPicks(session.current, epoch.current);
   };
   const dislikeQueued = async (entry: Entry) => {
     const index = queueRef.current.findIndex((other) => other.media.id === entry.media.id);
