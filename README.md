@@ -20,7 +20,7 @@ The browser uses `/api/v1`. JSON API errors include a stable code and request ID
 
 ## Media setup
 
-The app is led by the AI DJ. Pick where the music comes from (**YouTube**, **Your collection** or **Live radio**), tell the DJ what you'd like to hear, and select **Start the DJ**. The DJ finds the music, queues its picks with a note on why it chose each one, and keeps going as tracks end. Steer it at any time, and use **Like** and **Not for me** to teach it your taste. You never paste YouTube links. Under **Your collection** you can also browse and play your own MP3s yourself. **Setup** shows what is ready and how to fix what isn't. The theme follows your system's light or dark setting; the header menu can pin Light or Dark.
+The app is led by the AI DJ. Pick where the music comes from (**YouTube**, **Your collection** or **Live radio**), tell the DJ what you'd like to hear, and select **Start the DJ**. The DJ finds the music, queues its picks with a note on why it chose each one, and keeps going as tracks end. Steer it at any time, and use **Like** and **Not for me** to teach it your taste. You never paste YouTube links. Under **Live radio**, picking a station starts it playing straight away. Under **Your collection** you can also browse and play your own MP3s yourself. **Setup** shows what is ready and how to fix what isn't. The theme follows your system's light or dark setting; the header menu can pin Light or Dark.
 
 Set `MUSIC_LIBRARY_ROOT` to an absolute readable MP3 directory before starting the server, then select **Rescan** under **Your collection**.
 

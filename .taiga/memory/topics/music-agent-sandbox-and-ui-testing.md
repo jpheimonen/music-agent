@@ -10,6 +10,11 @@ Environment: Ubuntu host, music-agent with a web UI (`apps/web/dist`) and a Code
 ## Testing the DJ UI without the real Codex
 - To exercise the DJ UI while Codex is blocked, use a throwaway Node mock that serves `apps/web/dist` and fakes `/api/v1/capabilities`, `/dj/recommendations`, and `/jobs/:id`. This lets the UI be driven without a working Codex backend.
 
+## Mock DJ playback is audible — avoid triggering it
+- The saved `music-mock` service returns canned mainstream pop picks (Alan Walker, Despacito and similar), and clicking "Start the DJ" on it makes the YouTube embed actually play with sound, which the user hates.
+- When driving the app with the taiga runner browser, instruct the browser agent not to press Play, Start the DJ, Listen live, or station tiles unless a check needs playback; mute first when it does, and navigate to `about:blank` or stop the browser right after.
+- Radio playback can be confirmed silently: the "Now playing" state line only says `LIVE` after the audio element's `playing` event.
+
 ## Browser color-scheme emulation
 - The runner browser's `prefers-color-scheme` emulation may not actually apply unless you explicitly request CDP `Emulation.setEmulatedMedia` and then verify with `matchMedia`. Assuming it applied silently gives wrong results.
 
