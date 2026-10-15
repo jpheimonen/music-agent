@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "README.md line 75 still says a refill keeps 5 tracks; it now keeps up to 10, and the web app tops up Up next after the quick batch.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": true,
+    "reason": "The web bundle ships main.tsx, and the typecheck does not prove the Vite build still succeeds.",
+    "command": "taiga runner build"
+  },
+  {
+    "check": "smoke",
+    "run": true,
+    "reason": "The work pass never ran the app, and the request is about what Up next shows on screen.",
+    "command": "taiga runner browser \"Start the saved music-mock service and open the app. Before pressing anything, mute the page: set muted and volume 0 on every audio and video element, and mute the YouTube embed if you can. Start the DJ, wait up to 30 seconds, then report how many songs Up next lists, take a screenshot, and say whether the list grows after the first quick batch. Watch the network log for more than about 3 recommendation requests in a row, which would mean the refill is looping. Then go to about:blank right away so nothing keeps playing.\""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The fast run already covered every test suite (server and web), and they passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "The change touches no input handling, shell, file access, secrets or dependencies.",
+    "command": ""
+  }
+]
