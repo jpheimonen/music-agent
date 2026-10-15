@@ -75,19 +75,20 @@ test('music jobs keep a supported personal model and otherwise use the pinned ca
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('quick jobs use the catalog\'s small model at low effort, or the default model at low effort', () => {
+test('quick jobs use the model at low effort', () => {
   const catalog = { models: [
     { slug: 'gpt-6-astra', visibility: 'list', priority: 2, default_reasoning_level: 'medium', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }] },
     { slug: 'gpt-6-luna', visibility: 'list', priority: 4, default_reasoning_level: 'medium', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }] },
     { slug: 'gpt-5.6-luna', visibility: 'list', priority: 9, default_reasoning_level: 'medium' },
     { slug: 'hidden-mini', visibility: 'hide', priority: 1, default_reasoning_level: 'low' },
   ] };
-  assert.deepEqual(quickModelOverrides(catalog, 'newer-than-the-pinned-cli'), ['model="gpt-6-luna"', 'model_reasoning_effort="low"']);
+  assert.deepEqual(quickModelOverrides(catalog, 'newer-than-the-pinned-cli'), ['model="gpt-6-astra"', 'model_reasoning_effort="low"']);
+  assert.deepEqual(quickModelOverrides(catalog, 'gpt-6-luna'), ['model_reasoning_effort="low"']);
   const noSmall = { models: [{ slug: 'big', visibility: 'list', priority: 1, default_reasoning_level: 'high' }] };
   assert.deepEqual(quickModelOverrides(noSmall, undefined), ['model="big"', 'model_reasoning_effort="low"']);
   assert.deepEqual(quickModelOverrides(noSmall, 'big'), ['model_reasoning_effort="low"']);
   const highOnly = { models: [{ slug: 'tiny-mini', visibility: 'list', priority: 1, default_reasoning_level: 'high', supported_reasoning_levels: ['high'] }] };
-  assert.deepEqual(quickModelOverrides(highOnly, undefined), ['model="tiny-mini"', 'model_reasoning_effort="high"']);
+  assert.deepEqual(quickModelOverrides(highOnly, undefined), ['model="tiny-mini"', 'model_reasoning_effort="low"']);
 });
 
 test('npm PATH, explicit CLI shim, and native override resolve the native binary and reach the existing-login check', { skip: process.platform !== 'linux', timeout: 60000 }, async () => {
