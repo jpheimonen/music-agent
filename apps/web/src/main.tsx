@@ -15,6 +15,7 @@ import {
   type Capabilities,
   type DjMemory,
   type MediaItem,
+  type RadioSong,
   type StationId,
 } from "@music/contracts";
 import { api, json } from "./api";
@@ -46,6 +47,8 @@ import "@fontsource/silkscreen/latin-400.css";
 import "./style.css";
 
 type Theme = "system" | "light" | "dark";
+// A song heard on the radio, with the ID the server gave it.
+type RadioPick = { id: string; title: string; radioSong: RadioSong };
 const picksFailed = "Several picks couldn't play. Skip ahead or ask the DJ for something else.";
 const tabs: { id: Tab; label: string }[] = [
   { id: "youtube", label: "YouTube" },
@@ -569,7 +572,7 @@ function App() {
   };
 
   // Reactions are saved one at a time, because each write needs the latest revision.
-  const saveReaction = (item: MediaItem, intended: Reaction, key = crypto.randomUUID()): Promise<boolean> => {
+  const saveReaction = (item: MediaItem | RadioPick, intended: Reaction, key = crypto.randomUUID()): Promise<boolean> => {
     setPendingReaction({ id: item.id, value: intended });
     const work = reactions.current.then(async () => {
       try {
@@ -577,7 +580,7 @@ function App() {
         const saved = await api(`/feedback/${encodeURIComponent(item.id)}`, feedbackResponse, {
           method: "PUT",
           headers: { "Idempotency-Key": key },
-          body: JSON.stringify({ reaction: intended, expectedRevision: revision, media: item }),
+          body: JSON.stringify({ reaction: intended, expectedRevision: revision, ...("radioSong" in item ? { radioSong: item.radioSong } : { media: item }) }),
         });
         setTasteData((previous) => (previous ? { ...previous, feedbackRevision: saved.feedbackRevision, feedback: { ...previous.feedback, [item.id]: saved.reaction } } : previous));
         return true;
@@ -592,12 +595,16 @@ function App() {
     void work.then(() => refreshTaste());
     return work;
   };
-  const reaction: Reaction = track ? (pendingReaction?.id === track.media.id ? pendingReaction.value : tasteData?.feedback[track.media.id] || "neutral") : "neutral";
+  // A station's current song can be liked when the station names it.
+  const radioPick: RadioPick | null =
+    metadata?.status === "current" && metadata.songId ? { id: metadata.songId, title: metadata.title, radioSong: { title: metadata.title, artist: metadata.artist } } : null;
+  const likeable = track ? track.media : radioPick;
+  const reaction: Reaction = likeable ? (pendingReaction?.id === likeable.id ? pendingReaction.value : tasteData?.feedback[likeable.id] || "neutral") : "neutral";
   const toggleLike = async () => {
-    if (!track) return;
+    if (!likeable) return;
     const liked = reaction === "like";
-    if (await saveReaction(track.media, liked ? "neutral" : "like"))
-      setToast({ text: liked ? `Removed your like from “${track.media.title}”.` : `Liked “${track.media.title}”. The DJ will remember.` });
+    if (await saveReaction(likeable, liked ? "neutral" : "like"))
+      setToast({ text: liked ? `Removed your like from “${likeable.title}”.` : `Liked “${likeable.title}”. The DJ will remember.` });
   };
   const undoDislike = (item: MediaItem, restore?: () => void) => () => {
     restore?.();
@@ -861,6 +868,7 @@ function App() {
           now={now}
           playback={playback}
           reaction={reaction}
+          canLike={Boolean(likeable)}
           radioLive={radioLive}
           stationPending={stationPending}
           stationError={stationError}
