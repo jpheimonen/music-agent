@@ -664,12 +664,16 @@ function App() {
   // Media keys and the system's media controls.
   const controls = useRef({ togglePlay, skip });
   controls.current = { togglePlay, skip };
+  const tabTitle = track ? track.media.title : onAirStation ? (metadata?.status === "current" ? metadata.title : stationLabel(onAirStation)) : "";
+  useEffect(() => {
+    document.title = tabTitle ? `${tabTitle} · Listening room` : "Listening room";
+  }, [tabTitle]);
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
-    const title = track ? track.media.title : onAirStation ? (metadata?.status === "current" ? metadata.title : stationLabel(onAirStation)) : "";
+    const title = tabTitle;
     const artist = track ? artistOf(track.media) : onAirStation ? (metadata?.status === "current" ? metadata.artist || stationLabel(onAirStation) : stationNote(onAirStation)) : "";
     navigator.mediaSession.metadata = title ? new MediaMetadata({ title, artist, artwork: track?.media.artwork ? [{ src: track.media.artwork }] : [] }) : null;
-  }, [track, onAirStation, metadata]);
+  }, [tabTitle, track, onAirStation, metadata]);
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
     const handlers: [MediaSessionAction, MediaSessionActionHandler | null][] = [
@@ -894,3 +898,7 @@ function App() {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js").catch(() => undefined));
+}

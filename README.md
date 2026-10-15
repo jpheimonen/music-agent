@@ -14,6 +14,8 @@ npm start
 
 Open http://127.0.0.1:8787. The server binds loopback only and serves the built frontend and API from one origin. For development, run `npm run dev`, then open http://127.0.0.1:5173; Vite proxies `/api` to the backend. `npm run typecheck` checks all workspaces.
 
+The browser tab shows what is playing. The app can be installed from the browser as a standalone window. Its service worker in `apps/web/public/sw.js` caches only the page shell for offline start-up. API calls and audio always go to the server. After changing the shell, bump `CACHE` in that file.
+
 Set environment values before starting. `.env.example` lists them without credentials. `MUSIC_LIBRARY_ROOT` must be absolute. `MUSIC_DATA_DIR` defaults to the repository's `data/` directory; relative `MUSIC_DATA_DIR` and `MUSIC_CODEX_HOME` overrides are resolved from the repository root even when npm starts the server in its workspace. `MUSIC_YTDLP_BIN`, if set, must be an absolute path to your own yt-dlp. Do not expose the data directory publicly. Optional station endpoint overrides must be credential-free HTTPS.
 
 The browser uses `/api/v1`. JSON API errors include a stable code and request ID. No CORS is enabled. Requests are limited to local Host and same-origin mutation Origin. Jobs run in memory; cancellation is best effort, and a server restart does not resume them.
