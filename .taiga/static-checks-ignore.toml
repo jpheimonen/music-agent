@@ -63,3 +63,24 @@ rule = "DS172411"
 id = "31e0fdad0641"
 location = "apps/web/src/radio-metadata.ts:38"
 reason = "The polling callback is a fixed closure and the delay is the constant 30000 milliseconds. Abort cleanup clears the single polling timer; no untrusted code is evaluated."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "580f29b1dd57"
+location = "apps/server/src/codex.ts:214"
+reason = "Each setTimeout gets an arrow-function callback and a fixed numeric delay (60/90 s Codex timeout, 3 s capability poll, 6/10 s toast), never a string or user-controlled value."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "7c385c27f86c"
+location = "apps/web/src/main.tsx:369"
+reason = "Each setTimeout gets an arrow-function callback and a fixed numeric delay (60/90 s Codex timeout, 3 s capability poll, 6/10 s toast), never a string or user-controlled value."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "eb7cdf9c9563"
+location = "apps/web/src/main.tsx:383"
+reason = "Each setTimeout gets an arrow-function callback and a fixed numeric delay (60/90 s Codex timeout, 3 s capability poll, 6/10 s toast), never a string or user-controlled value."
