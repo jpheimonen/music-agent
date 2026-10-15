@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The change already updates the README with the AppArmor fix. I will confirm it matches the code during review.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": true,
+    "reason": "The app ships a Vite bundle, and the large main.tsx and CSS rewrite should be confirmed to build the way it ships.",
+    "command": "taiga runner build"
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Earlier browser checks ran the built app from this same commit, against both the real server and the mock DJ flow, in light and dark at desktop and mobile sizes. Nothing has changed since.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The fast step already ran every test suite the project has: typecheck, server tests and web adapter tests.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "The change touches the sandbox boundary check and spawns a process whose output it parses.",
+    "command": ""
+  }
+]

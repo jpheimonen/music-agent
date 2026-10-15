@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CodexRunner, executionOverrides } from '../dist/codex.js';
+import { CodexRunner, configuredModel, executionOverrides, modelOverrides, probeDiagnostic } from '../dist/codex.js';
 import { loadConfig } from '../dist/config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -55,7 +55,35 @@ test('pinned CLI sees a configured MCP server as disabled without rewriting conf
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('npm PATH, explicit CLI shim, and native override pass the real boundary before existing-login status', { skip: process.platform !== 'linux', timeout: 60000 }, async () => {
+test('a host that blocks user namespaces is reported as a sandbox setup problem, not a boundary failure', () => {
+  for (const stderr of ['bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n', 'bwrap: setting up uid map: Permission denied\n', 'bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.\n']) {
+    assert.equal(probeDiagnostic({ status: 1, stderr, signal: null }).cause, 'namespace_blocked');
+  }
+  assert.equal(probeDiagnostic({ status: 1, stderr: 'cat: /x: Permission denied\n', signal: null }).cause, 'unexpected_result');
+  assert.equal(probeDiagnostic({ status: 1, stderr: 'bwrap: execvp cat: No such file\n', signal: null }).cause, 'sandbox_exec_failed');
+});
+
+test('music jobs keep a supported personal model and otherwise use the pinned catalog preference', async () => {
+  const catalog = { models: [
+    { slug: 'hidden-model', visibility: 'hide', priority: 1, default_reasoning_level: 'low' },
+    { slug: 'second', visibility: 'list', priority: 5, default_reasoning_level: 'low' },
+    { slug: 'preferred', visibility: 'list', priority: 2, default_reasoning_level: 'medium' },
+  ] };
+  assert.deepEqual(modelOverrides(catalog, 'second'), []);
+  assert.deepEqual(modelOverrides(catalog, 'newer-than-the-pinned-cli'), ['model="preferred"', 'model_reasoning_effort="medium"']);
+  assert.deepEqual(modelOverrides(catalog, undefined), ['model="preferred"', 'model_reasoning_effort="medium"']);
+  assert.throws(() => modelOverrides({ models: [] }, 'x'), /codex_models_unavailable/);
+  const base = await mkdtemp(join(tmpdir(), 'music-codex-model-'));
+  try {
+    assert.equal(await configuredModel(base), undefined);
+    await writeFile(join(base, 'config.toml'), 'model="top"\nprofile="work"\n[profiles.work]\nmodel="from-profile"\n');
+    assert.equal(await configuredModel(base), 'from-profile');
+    await writeFile(join(base, 'config.toml'), 'model="top"\n');
+    assert.equal(await configuredModel(base), 'top');
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('npm PATH, explicit CLI shim, and native override pass the real boundary before existing-login status', { skip: process.platform !== 'linux', timeout: 60000 }, async (t) => {
   const base = await mkdtemp(join(tmpdir(), 'music-codex-startup-'));
   try {
     const shim = await realpath(require.resolve('@openai/codex/bin/codex.js'));
@@ -67,6 +95,10 @@ test('npm PATH, explicit CLI shim, and native override pass the real boundary be
       await writeFile(join(home, 'config.toml'), original);
       const config = loadConfig({ MUSIC_DATA_DIR: join(base, label.replace(' ', '-')), MUSIC_CODEX_HOME: home, MUSIC_CODEX_BIN: override });
       const runner = await CodexRunner.create(config);
+      if (runner.capability.reason === 'codex_sandbox_blocked') {
+        t.skip('this host blocks the user namespaces bubblewrap needs (see README: Codex DJ setup)');
+        return;
+      }
       assert.equal(runner.binary, native, `${label}: resolved native binary`);
       assert.equal(runner.runtime, dirname(dirname(native)), `${label}: minimal native runtime grant`);
       assert.deepEqual(runner.capability, { state: 'not_configured', reason: 'setup_required', authHomeSource: 'MUSIC_CODEX_HOME' }, `${label}: boundary passed before existing-login check`);
