@@ -107,23 +107,30 @@ export class PlaybackController {
     if (this.lockHeld || !navigator.locks) return true;
     let settled = false;
     return new Promise((resolve) => {
+      // stop() releases the lock just before the next item asks for it again,
+      // and the release lands a moment later. Wait briefly so a track change
+      // in this tab isn't mistaken for another tab playing.
       void navigator.locks
-        .request("music-agent-playback", { ifAvailable: true }, (lock) => {
-          if (!lock || !this.valid(epoch)) {
-            resolve(false);
-            return;
-          }
-          this.lockHeld = true;
-          settled = true;
-          resolve(true);
-          return new Promise<void>((done) => {
-            this.lockRelease = () => {
-              this.lockHeld = false;
-              this.lockRelease = null;
-              done();
-            };
-          });
-        })
+        .request(
+          "music-agent-playback",
+          { signal: AbortSignal.timeout(1000) },
+          (lock) => {
+            if (!lock || !this.valid(epoch)) {
+              resolve(false);
+              return;
+            }
+            this.lockHeld = true;
+            settled = true;
+            resolve(true);
+            return new Promise<void>((done) => {
+              this.lockRelease = () => {
+                this.lockHeld = false;
+                this.lockRelease = null;
+                done();
+              };
+            });
+          },
+        )
         .catch(() => {
           if (!settled) resolve(false);
         });

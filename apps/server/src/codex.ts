@@ -66,14 +66,30 @@ async function resolveNativeBinary(binary: string) {
     throw new CodexError('codex_runtime_missing', false);
   }
 }
-function probeDiagnostic(result: ReturnType<typeof spawnSync>) {
+// Hosts such as Ubuntu 24.04 with kernel.apparmor_restrict_unprivileged_userns=1
+// stop bubblewrap from setting up its namespaces. The sandbox never starts, so
+// this is a host setup problem rather than a boundary that leaked or misread.
+const namespaceBlocked = /bwrap: (loopback: Failed RTM_NEW|setting up uid map|No permissions to create a?\s*new namespace|Creating new namespace failed)/i;
+export function probeDiagnostic(result: Pick<ReturnType<typeof spawnSync>, 'error' | 'stderr' | 'signal' | 'status'>) {
   const stderr = typeof result.stderr === 'string' ? result.stderr : '';
-  const cause = result.error ? 'spawn_error' : /bwrap: execvp/.test(stderr) ? 'sandbox_exec_failed' : /Error: (invalid transport|failed to (load|parse|read) (configuration|config|model instructions)|unknown feature)/i.test(stderr) ? 'config_error' : result.signal ? 'signal' : 'unexpected_result';
+  const cause = result.error ? 'spawn_error' : namespaceBlocked.test(stderr) ? 'namespace_blocked' : /bwrap: execvp/.test(stderr) ? 'sandbox_exec_failed' : /Error: (invalid transport|failed to (load|parse|read) (configuration|config|model instructions)|unknown feature)/i.test(stderr) ? 'config_error' : result.signal ? 'signal' : 'unexpected_result';
   return { status: result.status, cause };
+}
+type CatalogModel = { slug?: unknown; visibility?: unknown; priority?: unknown; default_reasoning_level?: unknown };
+// The pinned CLI only accepts models from its own catalog. A newer model chosen
+// for the user's everyday Codex is rejected, so music jobs then use the
+// catalog's preferred model instead.
+export function modelOverrides(catalog: unknown, configuredModel: unknown) {
+  const models = (table(catalog).models ?? []) as CatalogModel[];
+  const listed = models.filter(model => model.visibility === 'list' && typeof model.slug === 'string').sort((a, b) => Number(a.priority) - Number(b.priority));
+  if (!listed.length) throw new CodexError('codex_models_unavailable', false);
+  if (listed.some(model => model.slug === configuredModel)) return [];
+  const [preferred] = listed;
+  return [`model=${JSON.stringify(preferred.slug)}`, ...(typeof preferred.default_reasoning_level === 'string' ? [`model_reasoning_effort=${JSON.stringify(preferred.default_reasoning_level)}`] : [])];
 }
 type ConfigTable = Record<string, unknown>;
 const table = (value: unknown): ConfigTable => value && typeof value === 'object' && !Array.isArray(value) ? value as ConfigTable : {};
-export async function executionOverrides(codexHome: string, allowed: string, runtime: string) {
+async function configLayers(codexHome: string) {
   let settings: ConfigTable = {};
   try {
     const source = await readFile(join(codexHome, 'config.toml'), 'utf8');
@@ -84,7 +100,14 @@ export async function executionOverrides(codexHome: string, allowed: string, run
   }
   const profiles = table(settings.profiles);
   const selectedProfile = typeof settings.profile === 'string' ? table(profiles[settings.profile]) : {};
-  const layers = [settings, selectedProfile];
+  return [settings, selectedProfile];
+}
+// The selected profile wins over top-level settings, as in the CLI.
+export async function configuredModel(codexHome: string) {
+  return (await configLayers(codexHome)).map(layer => layer.model).filter(model => typeof model === 'string').at(-1);
+}
+export async function executionOverrides(codexHome: string, allowed: string, runtime: string) {
+  const layers = await configLayers(codexHome);
   if (layers.some(layer => layer.openai_base_url || layer.chatgpt_base_url)) throw new CodexError('codex_config_incompatible', false);
   const servers = new Set(layers.flatMap(layer => Object.keys(table(layer.mcp_servers))));
   // The pinned CLI splits --config paths before TOML parsing. Quoted MCP IDs
@@ -128,6 +151,7 @@ export class CodexRunner {
   private runtime = '';
   private path = process.env.PATH ?? '/usr/bin:/bin';
   private searchVersionSupported = false;
+  private models: string[] = [];
   private discoveryFailure: string | null = null;
   get canAttemptDiscovery() { return this.capability.state === 'ready' && this.searchVersionSupported; }
   get discoveryCapability() {
@@ -152,6 +176,7 @@ export class CodexRunner {
         const diagnostic = probeDiagnostic(inside);
         console.error('Codex boundary allowed probe failed', diagnostic);
         if (diagnostic.cause === 'config_error') throw new CodexError('codex_config_incompatible', false);
+        if (diagnostic.cause === 'namespace_blocked') throw new CodexError('codex_sandbox_blocked', false);
         throw new CodexError('codex_boundary_allowed_failed',false);
       }
       if (forbidden.status === 0 || /OUTSIDE_SYNTHETIC/.test(forbidden.stdout + forbidden.stderr)) {
@@ -177,6 +202,10 @@ export class CodexRunner {
       const status = spawnSync(runner.binary, ['login', 'status'], { cwd: config.codexHome, encoding: 'utf8', timeout: 5000, env: codexEnv(config, runner.path) });
       if (status.error) throw status.error;
       if (status.status !== 0) throw new CodexError('setup_required', false);
+      const catalog = spawnSync(runner.binary, ['debug', 'models'], { cwd: config.codexHome, encoding: 'utf8', timeout: 10000, maxBuffer: 16 * 1024 * 1024, env: codexEnv(config, runner.path) });
+      let parsedCatalog: unknown;
+      try { parsedCatalog = JSON.parse(catalog.stdout); } catch { throw new CodexError('codex_models_unavailable', false); }
+      runner.models = modelOverrides(parsedCatalog, await configuredModel(config.codexHome));
       runner.capability.state = 'ready';
     } catch (error) {
       runner.capability.state = error instanceof CodexError && error.code === 'setup_required' ? 'not_configured' : 'unavailable';
@@ -227,7 +256,7 @@ export class CodexRunner {
       if (prompt.length > 50_000) throw new CodexError('invalid_request', false);
       const worker = fileURLToPath(new URL('./codex-worker.mjs', import.meta.url));
       const env = codexEnv(this.config, this.path);
-      const configOverrides = await executionOverrides(this.config.codexHome, scratch, this.runtime);
+      const configOverrides = [...await executionOverrides(this.config.codexHome, scratch, this.runtime), ...this.models];
       child = fork(worker, [], { detached: true, execArgv: [], stdio: ['ignore','ignore','ignore','ipc'], env });
       this.active = child;
       const response = await new Promise<{ok:boolean;finalResponse?:string;code?:string;searchEvidence?:unknown;searchEventCount?:unknown;schemaVersion?:unknown}>((resolveResult, reject) => {
