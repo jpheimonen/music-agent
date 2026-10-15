@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The README paragraph that named gpt-6-luna is already updated in the diff, and no other docs describe quick-job model selection.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "No dependencies, build configuration or bundled frontend code changed, and the typecheck and server tests that build the server already passed.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "A real run would call the hosted Codex model, which costs money, and the unit test already checks the exact config values passed to Codex.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The whole server suite, 45 tests, already passed on the final tree, and the web code does not use this function.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "No change to authentication, input handling, shell, file or network access, or dependencies.",
+    "command": ""
+  }
+]
