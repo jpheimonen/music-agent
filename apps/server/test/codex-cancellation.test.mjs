@@ -45,18 +45,24 @@ test('cancelling an active synthetic CLI reaps its descendant before releasing t
   } finally { abort.abort(); await runner.stop(); await rm(dir,{recursive:true,force:true}); }
 });
 
-test('queued DJ work takes priority over artist description', async () => {
+test('two jobs run at once and waiting DJ work goes before taste and artist notes', async () => {
   const runner = new CodexRunner(loadConfig({MUSIC_DATA_DIR:tmpdir()}));
   const order=[];
   await runner.acquire('synthesizeTaste');
+  await runner.acquire('pickTracks');
   const artist=runner.acquire('describeArtist').then(() => order.push('artist'));
+  const taste=runner.acquire('synthesizeTaste').then(() => order.push('taste'));
   const dj=runner.acquire('selectCandidates').then(() => order.push('dj'));
   runner.release();
   await dj;
   assert.deepEqual(order,['dj']);
   runner.release();
+  await taste;
+  assert.deepEqual(order,['dj','taste']);
+  runner.release();
   await artist;
-  assert.deepEqual(order,['dj','artist']);
+  assert.deepEqual(order,['dj','taste','artist']);
+  runner.release();
   runner.release();
   await runner.stop();
 });

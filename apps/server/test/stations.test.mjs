@@ -11,7 +11,7 @@ const kexp = (offset = -30_000) => ({ results: [{ play_type: 'trackplay', song: 
 
 test('all curated stations have consistent IDs, descriptions and HTTPS resolutions', () => {
   const descriptors = stationDescriptors();
-  assert.equal(descriptors.length, 9);
+  assert.equal(descriptors.length, 21);
   assert.deepEqual(descriptors.map(station => station.stationId), stationId.options);
   for (const station of descriptors) {
     stationDescriptor.parse(station);
@@ -115,7 +115,7 @@ test('HTTP cache age reduces relative song duration instead of extending an old 
 
 test('unsupported stations and replacement streams do not request misleading metadata', async () => {
   const service = new StationNowPlayingService(async () => { assert.fail('must not fetch'); }, () => now, { kexp: 'https://example.com/replacement' });
-  for (const id of ['yle1', 'wfmu', 'worldwide-fm', 'kexp']) assert.equal((await service.get(id)).status, 'unsupported');
+  for (const id of ['yle1', 'wfmu', 'worldwide-fm', 'kexp', 'radio-nova', 'wwoz', 'cashmere-radio', 'oe1']) assert.equal((await service.get(id)).status, 'unsupported');
 });
 
 test('provider errors, malformed bodies, oversized bodies and timeouts are unavailable', async () => {
@@ -137,4 +137,40 @@ test('provider errors, malformed bodies, oversized bodies and timeouts are unava
 
 test('unexpected internal errors remain visible', async () => {
   await assert.rejects(new StationNowPlayingService(async () => { throw new Error('implementation bug'); }, () => now).get('kexp'), /implementation bug/);
+});
+
+// A stream that carries ICY metadata: `interval` bytes of audio, a length byte, then the padded metadata.
+const icyStream = (title, encoding = 'utf8', interval = 16) => {
+  const metadata = Buffer.from(`StreamTitle='${title}';StreamUrl='';`, encoding);
+  const blocks = Math.ceil(metadata.length / 16);
+  const body = Buffer.concat([Buffer.alloc(interval, 0xff), Buffer.from([blocks]), metadata, Buffer.alloc(blocks * 16 - metadata.length), Buffer.alloc(32, 0xff)]);
+  return new Response(body, { headers: { 'content-type': 'audio/mpeg', 'icy-metaint': String(interval) } });
+};
+
+test('stations that name tracks inside the stream report artist and title from the stream itself', async () => {
+  let request;
+  const service = new StationNowPlayingService(async (url, init) => { request = { url, init }; return icyStream("Tanika Charles - Don't like you anymore"); }, () => now);
+  const result = stationNowPlaying.parse(await service.get('radio-meuh'));
+  assert.equal(request.url, resolveStation({ stationOverrides: {} }, 'radio-meuh').url);
+  assert.equal(request.init.headers['Icy-MetaData'], '1');
+  assert.deepEqual([result.status, result.kind, result.artist, result.title], ['current', 'track', 'Tanika Charles', "Don't like you anymore"]);
+  assert.equal(result.startedAt, null);
+  assert.equal(result.expiresAt, iso(90_000), 'a stream title expires like an undated report');
+  const intergalactic = await new StationNowPlayingService(async () => icyStream('Colbourne - In The Big City | Special Mix | The CBS Archives'), () => now).get('intergalactic-fm');
+  assert.deepEqual([intergalactic.artist, intergalactic.title], ['Colbourne', 'In The Big City']);
+  const latin = await new StationNowPlayingService(async () => icyStream('Björk - Jóga', 'latin1'), () => now).get('radio-swiss-jazz');
+  assert.deepEqual([latin.artist, latin.title], ['Björk', 'Jóga']);
+});
+
+test('show-based stations report the programme, and placeholders or missing metadata are unavailable', async () => {
+  const show = await new StationNowPlayingService(async () => icyStream('Rogue Planets - Resonance 104.4FM'), () => now).get('resonance-fm');
+  assert.deepEqual([show.status, show.kind, show.title, show.artist], ['current', 'programme', 'Rogue Planets', null]);
+  for (const placeholder of [' - ', '', 'Airtime - offline']) {
+    const result = await new StationNowPlayingService(async () => icyStream(placeholder), () => now).get('noods-radio');
+    assert.equal(result.status, 'unavailable');
+  }
+  const noMetadata = await new StationNowPlayingService(async () => new Response(Buffer.alloc(64), { headers: { 'content-type': 'audio/mpeg' } }), () => now).get('dublab');
+  assert.equal(noMetadata.status, 'unavailable');
+  const ended = await new StationNowPlayingService(async () => new Response(Buffer.alloc(8), { headers: { 'icy-metaint': '16' } }), () => now).get('dublab');
+  assert.equal(ended.status, 'unavailable');
 });

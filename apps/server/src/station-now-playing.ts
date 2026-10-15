@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StationId, StationNowPlaying } from '@music/contracts';
+import { stationStreams } from './stations.js';
 
 const text = z.string().trim().min(1).max(300);
 const stamp = z.string().datetime({ offset: true }).transform(value => Date.parse(value));
@@ -10,6 +11,19 @@ class FeedError extends Error {}
 class StaleFeed extends FeedError {}
 type Report = { kind: 'track' | 'programme'; title: string; artist: string | null; start?: number; end?: number };
 type Feed = { url: string; sourceUrl: string; html?: boolean };
+// Stations that name what's on inside the audio stream itself (ICY metadata):
+// some name tracks as "Artist - Title", others name the show.
+type IcyFeed = { icy: 'track' | 'programme'; sourceUrl: string; clean?: (title: string) => string };
+const icyFeeds: Partial<Record<StationId, IcyFeed>> = {
+  dublab: { icy: 'programme', sourceUrl: 'https://www.dublab.com/' },
+  'refuge-worldwide': { icy: 'programme', sourceUrl: 'https://refugeworldwide.com/' },
+  'radio-80000': { icy: 'programme', sourceUrl: 'https://www.radio80k.de/', clean: title => title.replace(/^radio80k\s*-\s*/i, '') },
+  'noods-radio': { icy: 'programme', sourceUrl: 'https://www.noodsradio.com/' },
+  'resonance-fm': { icy: 'programme', sourceUrl: 'https://www.resonancefm.com/', clean: title => title.replace(/\s*-\s*Resonance 104\.4\s*FM$/i, '') },
+  'radio-meuh': { icy: 'track', sourceUrl: 'https://www.radiomeuh.com/' },
+  'intergalactic-fm': { icy: 'track', sourceUrl: 'https://www.intergalactic.fm/', clean: title => title.split(' | ')[0] },
+  'radio-swiss-jazz': { icy: 'track', sourceUrl: 'https://www.radioswissjazz.ch/' },
+};
 
 function feedFor(id: StationId): Feed | null {
   switch (id) {
@@ -73,6 +87,48 @@ function parseReport(id: StationId, body: string, now: number): Report | null {
   return null;
 }
 
+// Reads the stream only as far as its first metadata block and returns StreamTitle.
+async function readIcyTitle(response: Response): Promise<string> {
+  const interval = Number(response.headers.get('icy-metaint'));
+  if (!Number.isInteger(interval) || interval < 1 || interval > 256 * 1024) throw new FeedError('no stream metadata');
+  const reader = response.body?.getReader();
+  if (!reader) throw new FeedError('missing body');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      if (total > interval) {
+        const bytes = Buffer.concat(chunks);
+        const end = interval + 1 + bytes[interval] * 16;
+        if (total >= end) {
+          const block = bytes.subarray(interval + 1, end);
+          let metadata = new TextDecoder('utf-8').decode(block);
+          // Older servers send Latin-1.
+          if (metadata.includes('\uFFFD')) metadata = new TextDecoder('latin1').decode(block);
+          return /StreamTitle='(.*?)';/s.exec(metadata)?.[1] ?? '';
+        }
+      }
+      const chunk = await reader.read();
+      if (chunk.done) throw new FeedError('stream ended');
+      total += chunk.value.byteLength;
+      chunks.push(chunk.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
+function icyReport(feed: IcyFeed, raw: string): Report | null {
+  const value = (feed.clean ? feed.clean(raw) : raw).replace(/\s+/g, ' ').trim();
+  // Between shows some stations send placeholders such as " - ".
+  if (!/[\p{L}\p{N}]/u.test(value) || /^(airtime|unknown|offline)\b/i.test(value)) return null;
+  if (feed.icy === 'programme') return { kind: 'programme', title: text.parse(value.slice(0, 300)), artist: null };
+  const split = value.indexOf(' - ');
+  const artist = split > 0 ? value.slice(0, split).trim() : '';
+  const title = split > 0 ? value.slice(split + 3).trim() : value;
+  return { kind: 'track', title: text.parse((title || value).slice(0, 300)), artist: artist ? text.parse(artist.slice(0, 300)) : null };
+}
+
 async function readBody(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) throw new FeedError('missing body');
@@ -98,7 +154,7 @@ export class StationNowPlayingService {
   constructor(private request: typeof fetch = fetch, private now: () => number = Date.now, private overrides: Partial<Record<StationId, string>> = {}) {}
 
   async get(id: StationId): Promise<StationNowPlaying> {
-    const feed = feedFor(id);
+    const feed = feedFor(id) ?? icyFeeds[id];
     // A replacement stream may carry another programme entirely.
     if (!feed || this.overrides[id]) return { stationId: id, status: 'unsupported', checkedAt: new Date(this.now()).toISOString(), sourceUrl: null };
     const cached = this.cache.get(id);
@@ -117,9 +173,18 @@ export class StationNowPlayingService {
     }
   }
 
-  private async load(id: StationId, feed: Feed): Promise<StationNowPlaying> {
+  private async load(id: StationId, feed: Feed | IcyFeed): Promise<StationNowPlaying> {
     const base = { stationId: id, sourceUrl: feed.sourceUrl };
     try {
+      if ('icy' in feed) {
+        const response = await this.request(stationStreams[id].url, { redirect: 'follow', signal: AbortSignal.timeout(8000), headers: { 'Icy-MetaData': '1' } });
+        if (!response.ok) { await response.body?.cancel(); throw new FeedError(`HTTP ${response.status}`); }
+        const report = icyReport(feed, await readIcyTitle(response));
+        const now = this.now();
+        if (!report) return { ...base, checkedAt: new Date(now).toISOString(), status: 'unavailable' };
+        // The stream does not say when a track or show ends, so the title expires like an undated feed.
+        return { ...base, checkedAt: new Date(now).toISOString(), status: 'current', kind: report.kind, title: report.title, artist: report.artist, startedAt: null, expiresAt: new Date(now + freshnessMs).toISOString() };
+      }
       const response = await this.request(feed.url, { redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Accept: feed.html ? 'text/html' : 'application/json', 'Cache-Control': 'no-cache' } });
       if (!response.ok) { await response.body?.cancel(); throw new FeedError(`HTTP ${response.status}`); }
       const contentType = response.headers.get('content-type') ?? '';

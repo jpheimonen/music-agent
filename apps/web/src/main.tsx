@@ -1,126 +1,69 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  capabilities,
-  trackPage,
-  mediaItem,
-  stationResolution,
-  stationCatalog,
-  stationId,
-  stationNowPlaying,
-  jobAccepted,
-  job,
-  recommendationResult,
-  taste,
-  feedbackResponse,
   artistInfo,
-  type MediaItem,
+  capabilities,
+  djMemory,
+  feedbackResponse,
+  job,
+  jobAccepted,
+  recommendationResult,
+  stationNowPlaying,
+  stationResolution,
+  taste,
+  trackPage,
   type Capabilities,
+  type DjMemory,
+  type MediaItem,
   type StationId,
 } from "@music/contracts";
-import { api, json, ApiFailure } from "./api";
-import { PlaybackController, type PlaybackState } from "./playback";
+import { api, json } from "./api";
+import { PlaybackController, trackFailed, type PlaybackState } from "./playback";
 import { watchStationMetadata, type RadioMetadata } from "./radio-metadata";
+import {
+  artistOf,
+  describe,
+  describeReason,
+  restoreListening,
+  stationLabel,
+  stationNote,
+  store,
+  stored,
+  type DjSource,
+  type Entry,
+  type Now,
+  type Reaction,
+  type Tab,
+  type Toast,
+} from "./model";
+import { PlayerBar } from "./player-bar";
+import { DjPanel } from "./dj-panel";
+import { ArtistNotes, CollectionPanel, QueuePanel, RadioPanel } from "./panels";
+import { SetupContent, TasteContent } from "./dialogs";
 import "@fontsource-variable/archivo/wdth.css";
 import "@fontsource-variable/archivo/wdth-italic.css";
 import "@fontsource/silkscreen/latin-400.css";
 import "./style.css";
 
-type Source = "local" | "youtube" | StationId;
-type Station = StationId;
-type Entry = { media: MediaItem; origin: "You" | "DJ pick"; reason?: string };
 type Theme = "system" | "light" | "dark";
-const labels = {
-  local: "Your collection",
-  youtube: "YouTube",
-  ...Object.fromEntries(Object.entries(stationCatalog).map(([id, station]) => [id, station.label])),
-} as Record<Source, string>;
-const stationNotes = Object.fromEntries(Object.entries(stationCatalog).map(([id, station]) => [id, station.note])) as Record<Station, string>;
-const stations = stationId.options;
-const sources: Source[] = ["youtube", "local", ...stations];
-const isRadio = (source: Source): source is Station =>
-  source !== "local" && source !== "youtube";
-const suggestions = [
-  "Surprise me",
-  "Something calm to focus to",
-  "More energy",
-  "Songs I haven't heard yet",
+const picksFailed = "Several picks couldn't play. Skip ahead or ask the DJ for something else.";
+const tabs: { id: Tab; label: string }[] = [
+  { id: "youtube", label: "YouTube" },
+  { id: "local", label: "Your collection" },
+  { id: "radio", label: "Live radio" },
 ];
-
-// Server and job errors arrive as stable codes. People see a sentence.
-const reasonText: Record<string, string> = {
-  setup_required:
-    "The DJ needs your Codex login. Sign in with your usual Codex CLI, then restart the server.",
-  provider_auth_failed:
-    "Your Codex login has expired. Sign in again with the Codex CLI, then restart the server.",
-  provider_quota_exceeded:
-    "Your Codex usage limit is reached. The DJ can pick again when it resets.",
-  provider_unavailable: "Codex didn't answer. Try again in a moment.",
-  unsupported_codex_version:
-    "The server found a Codex version other than the pinned 0.156.1. Start the app with npm start.",
-  codex_runtime_missing:
-    "The pinned Codex runtime is missing. Run npm ci, then restart the server.",
-  unsupported_codex_platform: "Codex doesn't support this platform.",
-  codex_config_incompatible:
-    "Your Codex config.toml has settings the DJ can't safely override for its jobs.",
-  codex_models_unavailable: "Codex couldn't list the models it supports.",
-  codex_cleanup_failed:
-    "A previous Codex job couldn't be stopped. Restart the server.",
-  unsupported_search_runtime:
-    "This Codex version can't search YouTube for the DJ.",
-  search_provenance_unavailable:
-    "The DJ's YouTube search returned results it couldn't verify. Try again.",
-  deadline_exceeded: "The DJ took too long to choose. Try again.",
-  invalid_agent_output: "The DJ's answer didn't make sense. Try again.",
-  revision_conflict:
-    "Your likes changed while the DJ was choosing. Ask again for fresh picks.",
-  library_unavailable: "Your collection isn't available. Check Setup.",
-  job_failed: "The DJ ran into a problem. Try again.",
-};
-const picksFailed =
-  "Several picks couldn't play. Skip ahead or ask the DJ for something else.";
-const describe = (error: unknown) => {
-  if (error instanceof ApiFailure)
-    return reasonText[error.message] || reasonText[error.code] || error.message;
-  if (error instanceof Error) return reasonText[error.message] || error.message;
-  return "Please try again.";
-};
-const describeReason = (reason?: string) =>
-  reason ? reasonText[reason] || reason : "";
-const formatTime = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
-function stored(key: string) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function store(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Listening keeps working when browser storage is disabled.
-  }
-}
-function rememberedItems(): Partial<Record<"local" | "youtube", MediaItem>> {
-  try {
-    const value = JSON.parse(stored("listening-items") || "{}");
-    const result: Partial<Record<"local" | "youtube", MediaItem>> = {};
-    for (const source of ["local", "youtube"] as const) {
-      const parsed = mediaItem.safeParse(value[source]);
-      if (parsed.success && parsed.data.source === source)
-        result[source] = parsed.data;
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
 function applyTheme(theme: Theme) {
   if (theme === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
 }
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      window.clearTimeout(timer);
+      reject(new Error("Cancelled"));
+    }, { once: true });
+  });
 
 function App() {
   const player = useRef(new PlaybackController()).current;
@@ -129,32 +72,30 @@ function App() {
     const saved = stored("theme");
     return saved === "light" || saved === "dark" ? saved : "system";
   });
-  const [source, setSource] = useState<Source>(() => {
-    const saved = stored("listening-source");
-    return sources.includes(saved as Source) ? (saved as Source) : "youtube";
-  });
-  const sourceRef = useRef(source);
-  const lastStation = useRef<Station>(isRadio(source) ? source : "kexp");
-  const epoch = useRef(0);
-  const retained = useRef(rememberedItems());
-  const [current, setCurrent] = useState<MediaItem | null>(
-    source === "local" || source === "youtube"
-      ? retained.current[source] || null
-      : null,
-  );
-  const currentRef = useRef<MediaItem | null>(current);
-  const [currentReason, setCurrentReason] = useState("");
+  const restored = useRef(restoreListening()).current;
+  // What you look at, where the DJ picks from and what plays are kept apart,
+  // so switching tabs never stops the music or the DJ.
+  const [tab, setTab] = useState<Tab>(restored.tab);
+  const [djSource, setDjSource] = useState<DjSource>(restored.djSource);
+  const djSourceRef = useRef(restored.djSource);
+  const [station, setStation] = useState<StationId>(restored.station);
+  const [now, setNowState] = useState<Now>(restored.last);
+  const nowRef = useRef<Now>(restored.last);
   const [queue, setQueue] = useState<Entry[]>([]);
   const queueRef = useRef<Entry[]>([]);
   const [dj, setDj] = useState(false);
   const djRef = useRef(false);
   const [djPending, setDjPending] = useState(false);
   const [djError, setDjError] = useState("");
-  const [request, setRequest] = useState("");
   const direction = useRef("");
   const [activeDirection, setActiveDirection] = useState("");
   const session = useRef(crypto.randomUUID());
+  const epoch = useRef(0);
+  // The DJ starts its next pick as soon as one is ready, even over the radio.
   const waitingForContinuation = useRef(false);
+  // After steering, the first new pick replaces the track that is playing.
+  const switchOnEpoch = useRef(-1);
+  const played = useRef<MediaItem[]>([]);
   const failedCandidates = useRef(0);
   const handledFailureEpoch = useRef(-1);
   const jobAbort = useRef<AbortController | null>(null);
@@ -165,61 +106,58 @@ function App() {
   const [stationPending, setStationPending] = useState(false);
   const stationRequest = useRef(0);
   const [radioMetadata, setRadioMetadata] = useState<RadioMetadata | null>(null);
-  const radioActive = isRadio(source) && (stationPending || ["playing", "loading", "needsGesture"].includes(playback.status));
   const [tracks, setTracks] = useState<MediaItem[]>([]);
   const libraryRequest = useRef(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [libraryError, setLibraryError] = useState("");
   const [scanStatus, setScanStatus] = useState("");
-  const [tasteData, setTasteData] = useState<ReturnType<
-    typeof taste.parse
-  > | null>(null);
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
-  const [pendingReaction, setPendingReaction] = useState<{
-    id: string;
-    value: "like" | "dislike" | "neutral";
-  } | null>(null);
-  const [feedbackNotice, setFeedbackNotice] = useState<{
-    title: string;
-    text: string;
-    retry?: () => void;
-  } | null>(null);
-  const [artistData, setArtistData] = useState<ReturnType<
-    typeof artistInfo.parse
-  > | null>(null);
+  const [tasteData, setTasteData] = useState<ReturnType<typeof taste.parse> | null>(null);
+  const [memory, setMemory] = useState<DjMemory | null>(null);
+  const [pendingReaction, setPendingReaction] = useState<{ id: string; value: Reaction } | null>(null);
+  const reactions = useRef<Promise<unknown>>(Promise.resolve());
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [artistData, setArtistData] = useState<ReturnType<typeof artistInfo.parse> | null>(null);
   const [artistExpanded, setArtistExpanded] = useState(false);
   const [panel, setPanel] = useState<"setup" | "taste" | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const invoker = useRef<HTMLElement | null>(null);
-  const videoHost = useRef<HTMLDivElement>(null);
   const [announcement, setAnnouncement] = useState("");
+  const dock = useRef<HTMLDivElement>(null);
+
+  const playing = playback.status === "playing";
+  const onAirStation = now?.kind === "station" ? now.stationId : null;
+  const radioLive = onAirStation !== null && (stationPending || ["playing", "loading", "needsGesture"].includes(playback.status));
+  const metadata = radioLive && radioMetadata?.stationId === onAirStation ? radioMetadata : null;
+  const track = now?.kind === "track" ? now : null;
 
   useEffect(() => {
     applyTheme(theme);
     store("theme", theme);
   }, [theme]);
-
+  // The page leaves exactly the player's height free at the bottom.
+  useEffect(() => {
+    const bar = dock.current?.querySelector<HTMLElement>(".player-bar");
+    if (!bar) return;
+    const observer = new ResizeObserver(() => document.documentElement.style.setProperty("--bar-space", `${Math.ceil(bar.getBoundingClientRect().height)}px`));
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     setRadioMetadata(null);
-    if (!isRadio(source) || !radioActive) return;
-    return watchStationMetadata(source, setRadioMetadata, (id, signal) =>
-      api(`/stations/${id}/now-playing`, stationNowPlaying, { signal }),
-    );
-  }, [source, radioActive]);
+    if (!onAirStation || !radioLive) return;
+    return watchStationMetadata(onAirStation, setRadioMetadata, (id, signal) => api(`/stations/${id}/now-playing`, stationNowPlaying, { signal }));
+  }, [onAirStation, radioLive]);
 
-  const updateQueue = useCallback(
-    (value: Entry[] | ((entries: Entry[]) => Entry[])) => {
-      const next =
-        typeof value === "function" ? value(queueRef.current) : value;
-      queueRef.current = next;
-      setQueue(next);
-    },
-    [],
-  );
-  const updateCurrent = useCallback((item: MediaItem | null) => {
-    currentRef.current = item;
-    setCurrent(item);
+  const setNow = useCallback((value: Now) => {
+    nowRef.current = value;
+    setNowState(value);
+    if (value?.kind === "track") store("last-track", JSON.stringify(value));
+  }, []);
+  const updateQueue = useCallback((value: Entry[] | ((entries: Entry[]) => Entry[])) => {
+    const next = typeof value === "function" ? value(queueRef.current) : value;
+    queueRef.current = next;
+    setQueue(next);
   }, []);
   const refreshCapabilities = useCallback(async () => {
     try {
@@ -233,110 +171,62 @@ function App() {
     try {
       setTasteData(await api("/taste", taste));
     } catch {
-      /* The panel shows unavailable. */
+      /* The taste dialog shows unavailable. */
     }
   }, []);
-  const loadTracks = useCallback(
-    async (search: string, nextCursor: string | null = null) => {
-      const request = ++libraryRequest.current;
-      try {
-        const params = new URLSearchParams();
-        if (search) params.set("q", search);
-        if (nextCursor) params.set("cursor", nextCursor);
-        const page = await api(`/library/tracks?${params}`, trackPage);
-        if (request !== libraryRequest.current) return;
-        setTracks((previous) =>
-          nextCursor ? [...previous, ...page.items] : page.items,
-        );
-        setCursor(page.nextCursor);
-        setLibraryError("");
-      } catch (error) {
-        if (request === libraryRequest.current)
-          setLibraryError(describe(error));
-      }
-    },
-    [],
-  );
+  const loadTracks = useCallback(async (search: string, nextCursor: string | null = null) => {
+    const request = ++libraryRequest.current;
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set("q", search);
+      if (nextCursor) params.set("cursor", nextCursor);
+      const page = await api(`/library/tracks?${params}`, trackPage);
+      if (request !== libraryRequest.current) return;
+      setTracks((previous) => (nextCursor ? [...previous, ...page.items] : page.items));
+      setCursor(page.nextCursor);
+      setLibraryError("");
+    } catch (error) {
+      if (request === libraryRequest.current) setLibraryError(describe(error));
+    }
+  }, []);
   const cancelJob = useCallback(() => {
     jobAbort.current?.abort();
     jobAbort.current = null;
-    if (jobId.current)
-      void fetch(`/api/v1/jobs/${jobId.current}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      }).catch(() => {});
+    if (jobId.current) void fetch(`/api/v1/jobs/${jobId.current}`, { method: "DELETE" }).catch(() => {});
     jobId.current = null;
     setDjPending(false);
   }, []);
-  const changeSource = (next: Source) => {
-    if (next === sourceRef.current) return;
-    cancelJob();
-    epoch.current++;
-    waitingForContinuation.current = false;
-    stationRequest.current++;
-    setStationPending(false);
-    setStationError("");
-    djRef.current = false;
-    setDj(false);
-    setDjError("");
-    setActiveDirection("");
-    player.stop();
-    sourceRef.current = next;
-    if (isRadio(next)) lastStation.current = next;
-    setSource(next);
-    store("listening-source", next);
-    updateCurrent(
-      next === "local" || next === "youtube"
-        ? retained.current[next] || null
-        : null,
-    );
-    setCurrentReason("");
-    updateQueue([]);
-    setAnnouncement(`${labels[next]} selected`);
-  };
+
+  // quick asks for a fast, smaller first batch when nothing is lined up yet.
   const requestPicks = useCallback(
-    async (requestSession: string, requestEpoch: number) => {
-      if (jobAbort.current || !djRef.current || isRadio(sourceRef.current))
-        return;
+    async (requestSession: string, requestEpoch: number, quick = false) => {
+      if (jobAbort.current || !djRef.current) return;
+      const source = djSourceRef.current;
       const abort = new AbortController();
       jobAbort.current = abort;
       setDjPending(true);
       setDjError("");
-      const steering = direction.current;
+      const current = nowRef.current?.kind === "track" ? nowRef.current.media : null;
       try {
         const payload = {
           sessionId: requestSession,
           modeEpoch: requestEpoch,
-          source: sourceRef.current,
-          seedId: currentRef.current?.id,
-          queuedIds: queueRef.current.map((item) => item.media.id),
-          recentIds: currentRef.current ? [currentRef.current.id] : [],
-          ...(steering ? { direction: steering } : {}),
+          source,
+          ...(current?.source === source ? { seedId: current.id } : {}),
+          queuedIds: queueRef.current.map((entry) => entry.media.id).slice(0, 100),
+          recentIds: current ? [current.id] : [],
+          recentTracks: [...new Map([current, ...played.current, ...queueRef.current.map((entry) => entry.media)].filter((item): item is MediaItem => Boolean(item)).map((item) => [item.id, item])).values()]
+            .slice(0, 30)
+            .map((item) => ({ title: item.title.slice(0, 300), artist: item.artist?.displayName.slice(0, 200) ?? null })),
+          ...(direction.current ? { direction: direction.current } : {}),
+          ...(quick ? { quick: true } : {}),
         };
-        const accepted = await api("/dj/recommendations", jobAccepted, {
-          ...json(payload),
-          signal: abort.signal,
-        });
+        const accepted = await api("/dj/recommendations", jobAccepted, { ...json(payload), signal: abort.signal });
         jobId.current = accepted.jobId;
         for (;;) {
-          await new Promise<void>((resolve, reject) => {
-            const timer = window.setTimeout(resolve, 1300);
-            abort.signal.addEventListener(
-              "abort",
-              () => {
-                clearTimeout(timer);
-                reject(new Error("Cancelled"));
-              },
-              { once: true },
-            );
-          });
-          const state = await api(`/jobs/${accepted.jobId}`, job, {
-            signal: abort.signal,
-          });
-          if (state.status === "failed" || state.status === "cancelled")
-            throw new Error(
-              state.error?.message || "The DJ couldn't find music this time.",
-            );
+          await pause(1300, abort.signal);
+          const state = await api(`/jobs/${accepted.jobId}`, job, { signal: abort.signal });
+          if (state.status === "failed" || state.status === "cancelled") throw new Error(state.error?.message || "The DJ couldn't find music this time.");
           if (state.status !== "succeeded") continue;
           const result = recommendationResult.parse(state.result);
           if (
@@ -346,39 +236,23 @@ function App() {
             session.current !== requestSession ||
             result.sessionId !== requestSession ||
             result.modeEpoch !== requestEpoch ||
-            result.source !== sourceRef.current
+            result.source !== djSourceRef.current
           )
             return;
-          const known = new Set([
-            currentRef.current?.id,
-            ...queueRef.current.map((entry) => entry.media.id),
-          ]);
-          const picks = result.items.filter(
-            (item) =>
-              item.media.source === sourceRef.current &&
-              item.media.availability === "available" &&
-              !known.has(item.media.id),
-          );
-          if (!picks.length)
-            throw new Error(
-              "The DJ didn't find anything new this time. Try asking for something different.",
-            );
-          updateQueue((entries) => [
-            ...entries,
-            ...picks.map((item) => ({
-              media: item.media,
-              origin: "DJ pick" as const,
-              reason: item.reason,
-            })),
-          ]);
-          setAnnouncement(
-            `The DJ queued ${picks.length} pick${picks.length === 1 ? "" : "s"}`,
-          );
+          const playingNow = nowRef.current?.kind === "track" ? nowRef.current.media.id : undefined;
+          const known = new Set([playingNow, ...queueRef.current.map((entry) => entry.media.id)]);
+          const picks = result.items.filter((item) => item.media.availability === "available" && !known.has(item.media.id));
+          if (!picks.length) throw new Error("The DJ didn't find anything new this time. Try asking for something different.");
+          updateQueue((entries) => [...entries, ...picks.map((item) => ({ media: item.media, origin: "DJ pick" as const, reason: item.reason }))]);
+          setAnnouncement(`The DJ queued ${picks.length} pick${picks.length === 1 ? "" : "s"}`);
+          if (switchOnEpoch.current === requestEpoch) {
+            switchOnEpoch.current = -1;
+            nextRef.current();
+          }
           return;
         }
       } catch (error) {
-        if (!abort.signal.aborted && epoch.current === requestEpoch)
-          setDjError(describe(error));
+        if (!abort.signal.aborted && epoch.current === requestEpoch) setDjError(describe(error));
       } finally {
         if (jobAbort.current === abort) {
           jobAbort.current = null;
@@ -389,170 +263,157 @@ function App() {
     },
     [updateQueue],
   );
-  // Starting or steering both send the request text and replace the DJ's
-  // upcoming picks. Songs you queued yourself stay.
-  const askDj = (text: string) => {
-    const steering = text.trim().slice(0, 500);
-    direction.current = steering;
-    setActiveDirection(steering);
-    setRequest("");
-    cancelJob();
-    updateQueue((entries) => entries.filter((entry) => entry.origin === "You"));
-    if (!djRef.current) {
-      djRef.current = true;
-      setDj(true);
-      session.current = crypto.randomUUID();
-      waitingForContinuation.current =
-        playback.status !== "playing" && playback.status !== "loading";
-    }
-    void requestPicks(session.current, epoch.current);
-  };
-  const stopDj = () => {
-    djRef.current = false;
-    waitingForContinuation.current = false;
-    setDj(false);
-    setDjError("");
-    setActiveDirection("");
-    cancelJob();
-    updateQueue((entries) => entries.filter((entry) => entry.origin === "You"));
-  };
+
   const choose = useCallback(
-    (item: MediaItem, automatic = false, reason = "") => {
-      if (
-        item.source !== sourceRef.current ||
-        item.availability !== "available"
-      )
-        return;
+    (media: MediaItem, origin: Entry["origin"], reason = "", automatic = false) => {
+      if (media.availability !== "available") return;
+      stationRequest.current++;
+      setStationPending(false);
+      setStationError("");
       waitingForContinuation.current = false;
       if (!automatic) failedCandidates.current = 0;
-      retained.current[item.source] = item;
-      store("listening-items", JSON.stringify(retained.current));
-      updateCurrent(item);
-      setCurrentReason(reason);
-      setAnnouncement(`Now playing ${item.title}`);
-      if (item.source === "local") void player.playLocal(item);
-      else void player.playYoutube(item);
+      played.current = [media, ...played.current.filter((other) => other.id !== media.id)].slice(0, 20);
+      setNow({ kind: "track", media, origin, reason });
+      setAnnouncement(`Now playing ${media.title}`);
+      void player.playTrack(media);
     },
-    [player, updateCurrent],
+    [player, setNow],
   );
+  // Skips and finished tracks teach the DJ. A track that never started tells it nothing.
+  const reportPlay = useCallback(
+    (outcome: "finished" | "skipped") => {
+      const current = nowRef.current;
+      const { elapsed, duration, status } = player.snapshot();
+      if (current?.kind !== "track" || (outcome === "skipped" && elapsed < 1 && status !== "playing")) return;
+      void fetch("/api/v1/listening", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          media: current.media,
+          outcome,
+          listenedSeconds: Math.min(elapsed, 86_400),
+          durationSeconds: duration && Number.isFinite(duration) ? Math.min(duration, 86_400) : null,
+        }),
+      }).catch(() => {});
+    },
+    [player],
+  );
+  const reportPlayRef = useRef(reportPlay);
+  reportPlayRef.current = reportPlay;
   const next = useCallback(() => {
     if (!queueRef.current.length) {
       waitingForContinuation.current = djRef.current;
-      player.stop();
-      if (djRef.current && !jobAbort.current)
-        void requestPicks(session.current, epoch.current);
+      if (nowRef.current?.kind === "track") player.stop();
+      if (djRef.current && !jobAbort.current) void requestPicks(session.current, epoch.current, true);
       return;
     }
     const [first, ...rest] = queueRef.current;
     updateQueue(rest);
-    choose(first.media, true, first.reason);
-    if (djRef.current && rest.length < 2 && !jobAbort.current)
-      void requestPicks(session.current, epoch.current);
+    choose(first.media, first.origin, first.reason, true);
+    if (djRef.current && rest.length < 2 && !jobAbort.current) void requestPicks(session.current, epoch.current);
   }, [choose, player, requestPicks, updateQueue]);
   const nextRef = useRef(next);
   nextRef.current = next;
-  useEffect(() => {
-    if (playback.status === "playing") {
-      failedCandidates.current = 0;
-      setDjError((error) => (error === picksFailed ? "" : error));
-      return;
-    }
-    if (
-      playback.status !== "failed" ||
-      !dj ||
-      !queue.length ||
-      handledFailureEpoch.current === playback.epoch
-    )
-      return;
-    if (
-      !playback.error?.startsWith("This audio") &&
-      !playback.error?.startsWith("This video")
-    )
-      return;
-    handledFailureEpoch.current = playback.epoch;
-    failedCandidates.current++;
-    if (failedCandidates.current <= 3) nextRef.current();
-    else setDjError(picksFailed);
-  }, [playback.status, playback.epoch, playback.error, dj, queue.length]);
+  const skip = () => {
+    reportPlay("skipped");
+    failedCandidates.current = 0;
+    next();
+  };
 
   useEffect(() => {
     const off = player.subscribe(setPlayback);
-    player.setEndedHandler(() => nextRef.current());
+    player.setEndedHandler(() => {
+      reportPlayRef.current("finished");
+      nextRef.current();
+    });
     return () => {
       off();
       player.dispose();
       cancelJob();
     };
   }, [player, cancelJob]);
+
+  // A pick that can't be played is skipped, up to three in a row.
+  useEffect(() => {
+    if (playback.status === "playing") {
+      failedCandidates.current = 0;
+      setDjError((error) => (error === picksFailed ? "" : error));
+      return;
+    }
+    if (playback.status !== "failed" || playback.error !== trackFailed || handledFailureEpoch.current === playback.epoch) return;
+    if (!queue.length && !dj) return;
+    handledFailureEpoch.current = playback.epoch;
+    failedCandidates.current++;
+    if (failedCandidates.current <= 3) {
+      if (nowRef.current?.kind === "track") setToast({ text: `“${nowRef.current.media.title}” couldn't be played, so the DJ skipped it.` });
+      nextRef.current();
+    } else setDjError(picksFailed);
+  }, [playback.status, playback.epoch, playback.error, dj, queue.length]);
+  // Start the next pick when the DJ is waiting for one. Radio keeps playing until it is ready.
+  useEffect(() => {
+    if (!dj || !queue.length) return;
+    const idle = playback.status !== "playing" && playback.status !== "loading";
+    if (now?.kind === "station" ? waitingForContinuation.current : (waitingForContinuation.current || !now) && idle) nextRef.current();
+  }, [dj, now, queue.length, playback.status]);
+
   useEffect(() => {
     void refreshCapabilities();
     void refreshTaste();
+    void api("/dj/memory", djMemory)
+      .then(setMemory)
+      .catch(() => setMemory({ notes: [], conversation: [] }));
   }, [refreshCapabilities, refreshTaste]);
+  // yt-dlp installs itself on first start; show YouTube as ready when it is.
   useEffect(() => {
-    if (source !== "local") return;
+    if (cap?.youtubePlayback.state !== "scanning") return;
+    const timer = window.setTimeout(() => void refreshCapabilities(), 3000);
+    return () => window.clearTimeout(timer);
+  }, [cap, refreshCapabilities]);
+  useEffect(() => {
+    if (tab !== "local") return;
     if (cap?.library.state === "not_configured") {
       setTracks([]);
       setLibraryError("");
       return;
     }
-    if (cap?.library.state === "ready" || cap?.library.state === "scanning")
-      void loadTracks(query);
-  }, [source, query, loadTracks, cap?.library.state]);
+    if (cap?.library.state === "ready" || cap?.library.state === "scanning") void loadTracks(query);
+  }, [tab, query, loadTracks, cap?.library.state]);
   useEffect(() => {
-    if (
-      dj &&
-      (waitingForContinuation.current || !current) &&
-      queue.length &&
-      playback.status !== "playing" &&
-      playback.status !== "loading"
-    )
-      nextRef.current();
-  }, [dj, current, queue.length, playback.status]);
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 10000 : 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  // Artist notes are written only for artists named in your files' tags.
+  const notesArtist = track?.media.artist && track.media.artist.confidence !== "low" && track.media.artist.provenance === "id3" ? track.media.artist : null;
   useEffect(() => {
-    player.setYoutubeHost(source === "youtube" ? videoHost.current : null);
-  }, [player, source, current]);
-  useEffect(() => {
-    const artist = current?.artist;
     setArtistData(null);
     setArtistExpanded(false);
-    if (!artist || artist.confidence === "low") return;
+    if (!notesArtist) return;
     let active = true;
-    void api(`/artists/${encodeURIComponent(artist.id)}/info`, artistInfo)
+    void api(`/artists/${encodeURIComponent(notesArtist.id)}/info`, artistInfo)
       .then((data) => {
-        if (active && data.artistKey === artist.id) setArtistData(data);
+        if (active && data.artistKey === notesArtist.id) setArtistData(data);
       })
       .catch(() => {
-        if (active) setArtistData({ artistKey: artist.id, status: "failed" });
+        if (active) setArtistData({ artistKey: notesArtist.id, status: "failed" });
       });
     return () => {
       active = false;
     };
-  }, [current?.id, current?.artist?.id]);
+  }, [notesArtist?.id]);
   useEffect(() => {
-    if (
-      artistData?.status !== "pending" ||
-      !artistData.jobId ||
-      !current?.artist
-    )
-      return;
-    const key = current.artist.id,
+    if (artistData?.status !== "pending" || !artistData.jobId || !notesArtist) return;
+    const key = notesArtist.id,
       id = artistData.jobId;
     let active = true;
     const timer = window.setInterval(() => {
       void api(`/jobs/${id}`, job)
         .then((state) => {
-          if (
-            !active ||
-            state.status === "queued" ||
-            state.status === "running"
-          )
-            return;
+          if (!active || state.status === "queued" || state.status === "running") return;
           window.clearInterval(timer);
           if (state.status === "succeeded")
-            void api(
-              `/artists/${encodeURIComponent(key)}/info`,
-              artistInfo,
-            ).then((info) => {
+            void api(`/artists/${encodeURIComponent(key)}/info`, artistInfo).then((info) => {
               if (active && info.artistKey === key) setArtistData(info);
             });
           else setArtistData({ artistKey: key, status: "failed" });
@@ -568,7 +429,17 @@ function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [artistData?.status, artistData?.jobId, current?.artist?.id]);
+  }, [artistData?.status, artistData?.jobId, notesArtist?.id]);
+  const retryArtist = async () => {
+    if (!notesArtist) return;
+    try {
+      const accepted = await api(`/artists/${encodeURIComponent(notesArtist.id)}/info/refresh`, jobAccepted, json({}));
+      setArtistData({ artistKey: notesArtist.id, status: "pending", jobId: accepted.jobId });
+    } catch {
+      setArtistData({ artistKey: notesArtist.id, status: "failed" });
+    }
+  };
+
   useEffect(() => {
     if (!panel || !dialog.current) return;
     const node = dialog.current;
@@ -584,79 +455,186 @@ function App() {
       if (node.open) node.close();
     };
   }, [panel]);
-  const openPanel = (
-    which: "setup" | "taste",
-    event: React.MouseEvent<HTMLButtonElement>,
-  ) => {
+  const openPanel = (which: "setup" | "taste", event: React.MouseEvent<HTMLButtonElement>) => {
     invoker.current = event.currentTarget;
     setPanel(which);
     if (which === "taste") void refreshTaste();
     else void refreshCapabilities();
   };
-  const listenRadio = async () => {
-    const selected = sourceRef.current,
-      requestEpoch = epoch.current;
-    if (!isRadio(selected)) return;
+
+  // The DJ picks from the YouTube or collection tab you chose last. Changing it
+  // replaces the DJ's upcoming picks; the track that is playing carries on.
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    store("listening-tab", next);
+    if (next === "radio" || next === djSourceRef.current) return;
+    djSourceRef.current = next;
+    setDjSource(next);
+    store("dj-source", next);
+    if (!djRef.current) return;
+    cancelJob();
+    epoch.current++;
+    updateQueue((entries) => entries.filter((entry) => entry.origin === "You"));
+    setAnnouncement(`The DJ now picks from ${next === "youtube" ? "YouTube" : "your collection"}`);
+    void requestPicks(session.current, epoch.current, true);
+  };
+  // Starting or steering both send the request text and replace the DJ's
+  // upcoming picks. Songs you queued yourself stay.
+  const startDj = (text: string) => {
+    const steering = text.trim().slice(0, 500);
+    direction.current = steering;
+    setActiveDirection(steering);
+    cancelJob();
+    epoch.current++;
+    updateQueue((entries) => entries.filter((entry) => entry.origin === "You"));
+    if (!djRef.current) {
+      djRef.current = true;
+      setDj(true);
+      session.current = crypto.randomUUID();
+      const current = nowRef.current;
+      waitingForContinuation.current = current?.kind === "station" || !["playing", "loading"].includes(player.snapshot().status);
+      if (tab === "radio") {
+        setTab(djSourceRef.current);
+        store("listening-tab", djSourceRef.current);
+      }
+    } else if (nowRef.current?.kind === "track" && ["playing", "loading", "paused"].includes(player.snapshot().status)) {
+      // Steering changes the music now: the first new pick replaces this track.
+      switchOnEpoch.current = epoch.current;
+    } else {
+      // Over the radio, or with nothing playing, the first new pick starts when it is ready.
+      waitingForContinuation.current = true;
+    }
+    void requestPicks(session.current, epoch.current, true);
+  };
+  const stopDj = () => {
+    djRef.current = false;
+    waitingForContinuation.current = false;
+    switchOnEpoch.current = -1;
+    direction.current = "";
+    setDj(false);
+    setDjError("");
+    setActiveDirection("");
+    cancelJob();
+    updateQueue((entries) => entries.filter((entry) => entry.origin === "You"));
+  };
+
+  const listenRadio = async (id: StationId) => {
     const request = ++stationRequest.current;
+    waitingForContinuation.current = false;
+    switchOnEpoch.current = -1;
+    setNow({ kind: "station", stationId: id });
     setStationPending(true);
     setStationError("");
     player.stop();
     try {
-      const stream = await api(
-        `/stations/${selected}/resolve`,
-        stationResolution,
-        json({}),
-      );
-      if (
-        request === stationRequest.current &&
-        requestEpoch === epoch.current &&
-        sourceRef.current === selected
-      )
-        await player.playStation(stream);
+      const stream = await api(`/stations/${id}/resolve`, stationResolution, json({}));
+      if (request === stationRequest.current) await player.playStation(stream);
     } catch (error) {
-      if (request === stationRequest.current && requestEpoch === epoch.current)
-        setStationError(describe(error));
+      if (request === stationRequest.current) setStationError(describe(error));
     } finally {
       if (request === stationRequest.current) setStationPending(false);
     }
   };
-  // Picking a station starts it. Picking the one already on air leaves it
-  // playing instead of reconnecting.
-  const tuneIn = (id: Station) => {
-    if (
-      id === sourceRef.current &&
-      (stationPending ||
-        playback.status === "playing" ||
-        playback.status === "loading")
-    )
-      return;
-    changeSource(id);
-    void listenRadio();
+  // Picking a station starts it. Picking the one already on air leaves it playing.
+  const tuneIn = (id: StationId) => {
+    setStation(id);
+    store("listening-station", id);
+    const current = nowRef.current;
+    if (current?.kind === "station" && current.stationId === id && (stationPending || ["playing", "loading"].includes(player.snapshot().status))) return;
+    void listenRadio(id);
   };
   const stopRadio = () => {
     stationRequest.current++;
     setStationPending(false);
     player.stop();
   };
-  const retryArtist = async () => {
-    const artist = current?.artist;
-    if (!artist || artist.confidence === "low") return;
-    try {
-      const accepted = await api(
-        `/artists/${encodeURIComponent(artist.id)}/info/refresh`,
-        jobAccepted,
-        json({}),
-      );
-      if (currentRef.current?.artist?.id === artist.id)
-        setArtistData({
-          artistKey: artist.id,
-          status: "pending",
-          jobId: accepted.jobId,
-        });
-    } catch {
-      if (currentRef.current?.artist?.id === artist.id)
-        setArtistData({ artistKey: artist.id, status: "failed" });
+  const backToDj = () => {
+    if (!djRef.current) return;
+    if (queueRef.current.length) {
+      next();
+      return;
     }
+    waitingForContinuation.current = true;
+    if (!jobAbort.current) void requestPicks(session.current, epoch.current, true);
+  };
+  const togglePlay = () => {
+    const current = nowRef.current;
+    if (!current) return;
+    if (current.kind === "station") {
+      if (radioLive) stopRadio();
+      else if (playback.status === "needsGesture") void player.resume();
+      else void listenRadio(current.stationId);
+    } else if (playing) player.pause();
+    else void player.playOrResume(current.media);
+  };
+
+  // Reactions are saved one at a time, because each write needs the latest revision.
+  const saveReaction = (item: MediaItem, intended: Reaction, key = crypto.randomUUID()): Promise<boolean> => {
+    setPendingReaction({ id: item.id, value: intended });
+    const work = reactions.current.then(async () => {
+      try {
+        const revision = (await api("/taste", taste)).feedbackRevision;
+        const saved = await api(`/feedback/${encodeURIComponent(item.id)}`, feedbackResponse, {
+          method: "PUT",
+          headers: { "Idempotency-Key": key },
+          body: JSON.stringify({ reaction: intended, expectedRevision: revision, media: item }),
+        });
+        setTasteData((previous) => (previous ? { ...previous, feedbackRevision: saved.feedbackRevision, feedback: { ...previous.feedback, [item.id]: saved.reaction } } : previous));
+        return true;
+      } catch (error) {
+        setToast({ text: `Your reaction to “${item.title}” wasn’t saved: ${describe(error)}`, action: { label: "Retry", run: () => void saveReaction(item, intended, key) } });
+        return false;
+      } finally {
+        setPendingReaction((current) => (current?.id === item.id ? null : current));
+      }
+    });
+    reactions.current = work;
+    void work.then(() => refreshTaste());
+    return work;
+  };
+  const reaction: Reaction = track ? (pendingReaction?.id === track.media.id ? pendingReaction.value : tasteData?.feedback[track.media.id] || "neutral") : "neutral";
+  const toggleLike = async () => {
+    if (!track) return;
+    const liked = reaction === "like";
+    if (await saveReaction(track.media, liked ? "neutral" : "like"))
+      setToast({ text: liked ? `Removed your like from “${track.media.title}”.` : `Liked “${track.media.title}”. The DJ will remember.` });
+  };
+  const undoDislike = (item: MediaItem, restore?: () => void) => () => {
+    restore?.();
+    void saveReaction(item, "neutral").then((saved) => saved && setToast({ text: `“${item.title}” is no longer disliked.` }));
+  };
+  // Not for me moves on at once, and the dislike can be undone.
+  const notForMe = async () => {
+    if (!track) return;
+    const item = track.media;
+    skip();
+    if (await saveReaction(item, "dislike")) setToast({ text: `Disliked “${item.title}”. The DJ won’t pick it again.`, action: { label: "Undo", run: undoDislike(item) } });
+  };
+  const refillIfLow = () => {
+    if (djRef.current && queueRef.current.length < 2 && !jobAbort.current && nowRef.current?.kind !== "station") void requestPicks(session.current, epoch.current);
+  };
+  const dislikeQueued = async (entry: Entry) => {
+    const index = queueRef.current.findIndex((other) => other.media.id === entry.media.id);
+    updateQueue((entries) => entries.filter((other) => other.media.id !== entry.media.id));
+    refillIfLow();
+    const putBack = () =>
+      updateQueue((entries) => (entries.some((other) => other.media.id === entry.media.id) ? entries : [...entries.slice(0, index), entry, ...entries.slice(index)]));
+    if (await saveReaction(entry.media, "dislike"))
+      setToast({ text: `Disliked “${entry.media.title}” and took it off Up next.`, action: { label: "Undo", run: undoDislike(entry.media, putBack) } });
+  };
+  const removeQueued = (entry: Entry) => {
+    updateQueue((entries) => entries.filter((other) => other.media.id !== entry.media.id));
+    refillIfLow();
+  };
+  const playQueued = (entry: Entry) => {
+    updateQueue((entries) => entries.filter((other) => other.media.id !== entry.media.id));
+    choose(entry.media, entry.origin, entry.reason);
+    refillIfLow();
+  };
+  const addQueue = (item: MediaItem) => {
+    if (queueRef.current.some((entry) => entry.media.id === item.id)) return;
+    updateQueue((entries) => [...entries.filter((entry) => entry.origin === "You"), { media: item, origin: "You" }, ...entries.filter((entry) => entry.origin === "DJ pick")]);
+    setAnnouncement(`${item.title} added to Up next`);
   };
   const scan = async () => {
     setScanStatus("Scanning your collection…");
@@ -665,8 +643,7 @@ function App() {
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 1200));
         const state = await api(`/jobs/${accepted.jobId}`, job);
-        if (state.status === "failed")
-          throw new Error(state.error?.message || "The scan failed.");
+        if (state.status === "failed") throw new Error(state.error?.message || "The scan failed.");
         if (state.status === "succeeded") break;
       }
       setScanStatus("Scan complete.");
@@ -676,121 +653,60 @@ function App() {
       setScanStatus(describe(error));
     }
   };
-  const saveReaction = async (
-    item: MediaItem,
-    intended: "like" | "dislike" | "neutral",
-    key = crypto.randomUUID(),
-  ) => {
-    if (feedbackBusy) return;
-    setFeedbackBusy(true);
-    setPendingReaction({ id: item.id, value: intended });
-    setFeedbackNotice({ title: item.title, text: "Saving…" });
+  const forgetNote = async (id: string) => {
     try {
-      const revision = (await api("/taste", taste)).feedbackRevision;
-      const saved = await api(
-        `/feedback/${encodeURIComponent(item.id)}`,
-        feedbackResponse,
-        {
-          method: "PUT",
-          headers: { "Idempotency-Key": key },
-          body: JSON.stringify({
-            reaction: intended,
-            expectedRevision: revision,
-            media: item,
-          }),
-        },
-      );
-      setTasteData((previous) =>
-        previous
-          ? {
-              ...previous,
-              feedbackRevision: saved.feedbackRevision,
-              feedback: { ...previous.feedback, [item.id]: saved.reaction },
-            }
-          : previous,
-      );
-      setFeedbackNotice({
-        title: item.title,
-        text:
-          saved.reaction === "like"
-            ? "Liked. The DJ will remember."
-            : saved.reaction === "dislike"
-              ? "Disliked. The DJ won't pick it again."
-              : "Reaction removed.",
-      });
-      void refreshTaste();
+      setMemory(await api(`/dj/notes/${id}`, djMemory, { method: "DELETE" }));
     } catch (error) {
-      setFeedbackNotice({
-        title: item.title,
-        text: `Your reaction wasn’t saved: ${describe(error)}`,
-        retry: () => {
-          void saveReaction(item, intended, key);
-        },
-      });
-    } finally {
-      setFeedbackBusy(false);
-      setPendingReaction(null);
+      setToast({ text: `That note wasn’t forgotten: ${describe(error)}` });
     }
   };
-  const addQueue = (item: MediaItem) => {
-    if (
-      item.source !== source ||
-      queueRef.current.some((entry) => entry.media.id === item.id)
-    )
-      return;
-    updateQueue((entries) => [
-      ...entries.filter((entry) => entry.origin === "You"),
-      { media: item, origin: "You" },
-      ...entries.filter((entry) => entry.origin === "DJ pick"),
-    ]);
-    setAnnouncement(`${item.title} added to Up next`);
-  };
 
-  const djBlocker =
-    !cap || isRadio(source)
-      ? ""
-      : cap.codex.state !== "ready"
-        ? describeReason(cap.codex.reason) ||
-          "The DJ needs your Codex login. Check Setup."
-        : source === "youtube" && cap.youtubeDiscovery.state !== "ready"
-          ? describeReason(cap.youtubeDiscovery.reason) ||
-            "The DJ can't search YouTube right now."
-          : source === "local" && cap.library.state !== "ready"
-            ? cap.library.state === "not_configured"
-              ? "Point the server at your MP3 folder first. Setup shows how."
-              : "Your collection isn't ready yet. Check Setup."
-            : "";
-  const reaction = current
-    ? pendingReaction?.id === current.id
-      ? pendingReaction.value
-      : tasteData?.feedback[current.id] || "neutral"
-    : "neutral";
-  const summaryUnavailable =
-    tasteData?.summaryStatus === "pending" && cap?.codex.state !== "ready";
-  const playing = playback.status === "playing";
-  const radioLive = stationPending || playing || playback.status === "loading";
-  const metadata = radioActive && radioMetadata?.stationId === source ? radioMetadata : null;
-  const currentArtist =
-    current?.artist?.displayName || current?.attribution || "Artist unknown";
+  // Media keys and the system's media controls.
+  const controls = useRef({ togglePlay, skip });
+  controls.current = { togglePlay, skip };
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const title = track ? track.media.title : onAirStation ? (metadata?.status === "current" ? metadata.title : stationLabel(onAirStation)) : "";
+    const artist = track ? artistOf(track.media) : onAirStation ? (metadata?.status === "current" ? metadata.artist || stationLabel(onAirStation) : stationNote(onAirStation)) : "";
+    navigator.mediaSession.metadata = title ? new MediaMetadata({ title, artist, artwork: track?.media.artwork ? [{ src: track.media.artwork }] : [] }) : null;
+  }, [track, onAirStation, metadata]);
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const handlers: [MediaSessionAction, MediaSessionActionHandler | null][] = [
+      ["play", () => controls.current.togglePlay()],
+      ["pause", () => controls.current.togglePlay()],
+      ["nexttrack", now?.kind === "track" ? () => controls.current.skip() : null],
+    ];
+    for (const [action, handler] of handlers)
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // This browser doesn't support that action.
+      }
+  }, [now?.kind]);
+
+  const djBlocker = !cap
+    ? ""
+    : cap.codex.state !== "ready"
+      ? describeReason(cap.codex.reason) || "The DJ needs your Codex login. Check Setup."
+      : djSource === "youtube" && cap.youtubeDiscovery.state !== "ready"
+        ? describeReason(cap.youtubeDiscovery.reason) || "YouTube isn't ready yet. Check Setup."
+        : djSource === "local" && cap.library.state !== "ready"
+          ? cap.library.state === "not_configured"
+            ? "Point the server at your MP3 folder first. Setup shows how."
+            : "Your collection isn't ready yet. Check Setup."
+          : "";
+  const chatBlocker = !cap || cap.codex.state === "ready" ? "" : describeReason(cap.codex.reason) || "The DJ needs your Codex login. Check Setup.";
+  const playerMessage =
+    onAirStation && stationError ? `Couldn’t connect to ${stationLabel(onAirStation)}: ${stationError}` : playback.error || (playback.status === "needsGesture" ? "Press Play to start listening." : "");
   // The ticker repeats what the page already says, so screen readers skip it.
-  const ticker = isRadio(source)
-    ? [
-        playing ? "On air" : radioLive ? "Tuning in" : "Live radio",
-        labels[source],
-        stationNotes[source],
-      ]
-    : current
-      ? [playing ? "Now playing" : "Up now", current.title, currentArtist]
+  const ticker = onAirStation
+    ? [playing ? "On air" : radioLive ? "Tuning in" : "Live radio", stationLabel(onAirStation), stationNote(onAirStation)]
+    : track
+      ? [playing ? "Now playing" : "Up now", track.media.title, artistOf(track.media)]
       : dj
         ? ["The DJ is on", "Picking your first track"]
         : ["Tell the DJ what you want", "YouTube", "Your collection", "Live radio"];
-  const sticker = isRadio(source)
-    ? playing
-      ? "On air!"
-      : "Live!"
-    : dj
-      ? "DJ on!"
-      : "AI DJ";
 
   return (
     <div className="app-shell">
@@ -805,24 +721,15 @@ function App() {
           </p>
         </div>
         <nav aria-label="App">
-          <button
-            className="text-button"
-            onClick={(event) => openPanel("taste", event)}
-          >
+          <button className="text-button" onClick={(event) => openPanel("taste", event)}>
             Your taste
           </button>
-          <button
-            className="text-button"
-            onClick={(event) => openPanel("setup", event)}
-          >
+          <button className="text-button" onClick={(event) => openPanel("setup", event)}>
             Setup
           </button>
           <label className="theme-picker">
             <span className="sr-only">Theme</span>
-            <select
-              value={theme}
-              onChange={(event) => setTheme(event.target.value as Theme)}
-            >
+            <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
               <option value="system">System theme</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
@@ -834,11 +741,7 @@ function App() {
         <div className="ticker-track">
           {[0, 1].map((copy) => (
             <div className="ticker-copy" key={copy}>
-              {[0, 1, 2].flatMap((round) =>
-                ticker.map((text, index) => (
-                  <span key={`${round}-${index}`}>{text}</span>
-                )),
-              )}
+              {[0, 1, 2].flatMap((round) => ticker.map((text, index) => <span key={`${round}-${index}`}>{text}</span>))}
             </div>
           ))}
         </div>
@@ -861,826 +764,128 @@ function App() {
         </div>
       )}
       <main className="layout">
+        <DjPanel
+          dj={dj}
+          djSource={djSource}
+          direction={activeDirection}
+          pending={djPending}
+          error={djError}
+          blocker={djBlocker}
+          chatBlocker={chatBlocker}
+          memory={memory}
+          nowPlaying={track ? { title: track.media.title, artist: track.media.artist?.displayName ?? null } : null}
+          onMemory={setMemory}
+          onStart={startDj}
+          onFollow={startDj}
+          onStop={stopDj}
+          onRetry={() => void requestPicks(session.current, epoch.current, !queueRef.current.length)}
+          onCancel={() => {
+            cancelJob();
+            setDjError("Request cancelled.");
+          }}
+          onSetup={(event) => openPanel("setup", event)}
+        />
         <div className="stage">
-          <section className="booth card" aria-labelledby="booth-heading">
-            <div className="sticker" aria-hidden="true">
-              <span>{sticker}</span>
-            </div>
-            <div className="booth-top">
-              <div className="eyebrow">YOUR AI DJ</div>
-              <div
-                className="mode-switch"
-                role="group"
-                aria-label="Where the music comes from"
-              >
-                <button
-                  aria-pressed={source === "youtube"}
-                  onClick={() => changeSource("youtube")}
-                >
-                  <span className="mode-index" aria-hidden="true">
-                    01
-                  </span>
-                  YouTube
-                </button>
-                <button
-                  aria-pressed={source === "local"}
-                  onClick={() => changeSource("local")}
-                >
-                  <span className="mode-index" aria-hidden="true">
-                    02
-                  </span>
-                  Your collection
-                </button>
-                <button
-                  aria-pressed={isRadio(source)}
-                  onClick={() => changeSource(lastStation.current)}
-                >
-                  <span className="mode-index" aria-hidden="true">
-                    03
-                  </span>
-                  Live radio
-                </button>
-              </div>
-            </div>
-            {isRadio(source) ? (
-              <>
-                <h1 id="booth-heading" className="booth-heading">
-                  Tune in <em>live</em>
-                </h1>
-                <p className="subtle">
-                  Real stations, real hosts. Pick one and it starts playing.
-                  The DJ takes a break while you listen.
-                </p>
-                <div className="station-list">
-                  {stations.map((id, index) => {
-                    const onAir = source === id && playing;
-                    return (
-                      <button
-                        key={id}
-                        className={`station ${onAir ? "on-air" : ""}`}
-                        aria-pressed={source === id}
-                        onClick={() => tuneIn(id)}
-                      >
-                        <span className="station-preset" aria-hidden="true">
-                          Preset {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <strong>{labels[id]}</strong>
-                        <span className="station-note">{stationNotes[id]}</span>
-                        {source === id && radioLive && (
-                          <span className="station-live">
-                            {onAir && (
-                              <span className="eq" aria-hidden="true">
-                                <i />
-                                <i />
-                                <i />
-                                <i />
-                              </span>
-                            )}
-                            {onAir ? "On air" : "Tuning in…"}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            ) : dj ? (
-              <>
-                <h1 id="booth-heading" className="booth-heading">
-                  <span className="live-dot" aria-hidden="true" />
-                  <span>
-                    The DJ is <em>on</em>
-                  </span>
-                </h1>
-                <p className="subtle">
-                  Picking from{" "}
-                  {source === "youtube" ? "YouTube" : "your collection"}
-                  {activeDirection ? (
-                    <>
-                      {" "}
-                      · you asked for <q>{activeDirection}</q>
-                    </>
-                  ) : (
-                    " · following your taste"
-                  )}
-                </p>
-                <form
-                  className="ask"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (request.trim()) askDj(request);
-                  }}
-                >
-                  <label htmlFor="ask" className="sr-only">
-                    Steer the DJ
-                  </label>
-                  <input
-                    id="ask"
-                    value={request}
-                    maxLength={500}
-                    onChange={(event) => setRequest(event.target.value)}
-                    placeholder="Steer the DJ: calmer, more guitar, 90s…"
-                  />
-                  <button className="primary-button" disabled={!request.trim()}>
-                    Steer
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={stopDj}
-                  >
-                    Stop DJ
-                  </button>
-                </form>
-              </>
-            ) : (
-              <>
-                <h1 id="booth-heading" className="booth-heading">
-                  What should we <em>listen</em> to?
-                </h1>
-                <p className="subtle">
-                  {source === "youtube"
-                    ? "Tell the DJ a mood, an artist or a moment. It finds the music on YouTube and keeps it going, guided by your likes."
-                    : "Tell the DJ a mood, an artist or a moment. It picks from your own MP3s and keeps it going, guided by your likes."}
-                </p>
-                <form
-                  className="ask"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    askDj(request);
-                  }}
-                >
-                  <label htmlFor="ask" className="sr-only">
-                    What you'd like to hear
-                  </label>
-                  <input
-                    id="ask"
-                    value={request}
-                    maxLength={500}
-                    onChange={(event) => setRequest(event.target.value)}
-                    placeholder="Late-night jazz, something like Khruangbin…"
-                  />
-                  <button
-                    className="primary-button"
-                    disabled={Boolean(djBlocker) || !cap}
-                  >
-                    Start the DJ
-                  </button>
-                </form>
-                <div className="suggestions" aria-label="Ideas">
-                  {suggestions.map((idea) => (
-                    <button
-                      key={idea}
-                      className="chip"
-                      disabled={Boolean(djBlocker) || !cap}
-                      onClick={() => askDj(idea === "Surprise me" ? "" : idea)}
-                    >
-                      {idea}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            {!isRadio(source) && djBlocker && (
-              <div className="blocker" role="note">
-                <p>{djBlocker}</p>
-                <button
-                  className="inline-button"
-                  onClick={(event) => openPanel("setup", event)}
-                >
-                  How to fix this
-                </button>
-              </div>
-            )}
-            {djPending && (
-              <p className="dj-status" role="status">
-                <span className="spinner" aria-hidden="true" />
-                {source === "youtube"
-                  ? "The DJ is searching YouTube for your next picks…"
-                  : "The DJ is choosing from your collection…"}{" "}
-                <button
-                  className="inline-button"
-                  onClick={() => {
-                    cancelJob();
-                    setDjError("Request cancelled.");
-                  }}
-                >
-                  Cancel
-                </button>
-              </p>
-            )}
-            {djError && (
-              <p className="error-text" role="alert">
-                {djError}{" "}
-                {dj && !djPending && (
-                  <button
-                    className="inline-button"
-                    onClick={() =>
-                      void requestPicks(session.current, epoch.current)
-                    }
-                  >
-                    Try again
-                  </button>
-                )}
-              </p>
-            )}
-          </section>
-
-          <section
-            className={`now-playing card ${playing ? "is-playing" : ""}`}
-            aria-labelledby="now-heading"
-          >
-            <div className="lcd">
-              <div className="section-label" id="now-heading">
-                NOW PLAYING
-              </div>
-              <span className="eq" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-                <i />
-              </span>
-            </div>
-            {isRadio(source) ? (
-              <div className="radio-now">
-                <div className="track-identity">
-                  <div className="disc" aria-hidden="true" />
-                  <div>
-                    <p className="state-line">
-                      {playing
-                        ? "LIVE"
-                        : stationPending || playback.status === "loading"
-                          ? "CONNECTING"
-                          : stationError || playback.status === "failed"
-                            ? "UNAVAILABLE"
-                            : "OFF AIR"}
-                    </p>
-                    <h2 className="track-title">{labels[source]}</h2>
-                    <p className="artist-name">{stationNotes[source]}</p>
-                  </div>
-                </div>
-                <div className="radio-metadata" aria-live="polite" aria-atomic="true">
-                  {metadata?.status === "current" ? (
-                    <>
-                      <p className="metadata-label">{metadata.kind === "programme" ? "On air · programme" : "Latest reported track"}</p>
-                      <p className="metadata-title">{metadata.title}</p>
-                      {metadata.artist && <p className="metadata-artist">{metadata.artist}</p>}
-                      <p className="metadata-note">
-                        <a href={metadata.sourceUrl || stationCatalog[source].website} target="_blank" rel="noreferrer">{labels[source]} playlist</a>
-                        {" · "}Station information may differ slightly from the audio.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="metadata-note">
-                      {!radioActive ? "Track information appears while you listen."
-                        : !metadata || metadata.status === "loading" ? "Checking what’s on air…"
-                        : metadata.status === "unsupported" ? "Live track information isn’t provided for this stream."
-                        : metadata.status === "stale" ? "The station’s last update has expired. Checking again shortly."
-                        : "Live track information is unavailable right now."}
-                    </p>
-                  )}
-                </div>
-                <div className="transport">
-                  <button
-                    className="primary-button"
-                    onClick={() =>
-                      radioLive
-                        ? stopRadio()
-                        : playback.status === "needsGesture"
-                          ? void player.resume()
-                          : void listenRadio()
-                    }
-                  >
-                    {radioLive
-                      ? "Stop"
-                      : playback.status === "needsGesture"
-                        ? "Play"
-                        : "Listen live"}
-                  </button>
-                </div>
-                {stationError && (
-                  <p className="error-text" role="alert">
-                    Couldn’t connect to {labels[source]}: {stationError}{" "}
-                    <button
-                      className="inline-button"
-                      onClick={() => void listenRadio()}
-                    >
-                      Retry
-                    </button>
-                  </p>
-                )}
-              </div>
-            ) : (
-              <>
-                {source === "youtube" && current && (
-                  <div
-                    className="video-frame"
-                    ref={videoHost}
-                    aria-label="YouTube player"
-                  />
-                )}
-                <div className="track-identity">
-                  {current?.artwork && source === "local" ? (
-                    <img className="artwork" src={current.artwork} alt="" />
-                  ) : (
-                    <div className="disc" aria-hidden="true" />
-                  )}
-                  <div>
-                    <h2 className="track-title">
-                      {current?.title || "Nothing playing yet"}
-                    </h2>
-                    <p className="artist-name">
-                      {current
-                        ? currentArtist
-                        : dj
-                          ? "Your first pick starts as soon as the DJ has it."
-                          : "Ask the DJ above and it will start the music."}
-                    </p>
-                    {current?.album && (
-                      <p className="subtle">{current.album}</p>
-                    )}
-                  </div>
-                </div>
-                {current && currentReason && (
-                  <p className="dj-note">
-                    <span>Why the DJ picked this</span>
-                    {currentReason}
-                  </p>
-                )}
-                {current && (
-                  <div className="transport">
-                    <button
-                      className="primary-button"
-                      onClick={() =>
-                        playing
-                          ? player.pause()
-                          : void player.playOrResume(current)
-                      }
-                    >
-                      {playing ? "Pause" : "Play"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      disabled={!queue.length && !dj}
-                      onClick={() => {
-                        failedCandidates.current = 0;
-                        next();
-                      }}
-                    >
-                      Skip
-                    </button>
-                    <button
-                      className={`reaction ${reaction === "like" ? "active" : ""}`}
-                      aria-pressed={reaction === "like"}
-                      disabled={feedbackBusy}
-                      onClick={() =>
-                        void saveReaction(
-                          current,
-                          reaction === "like" ? "neutral" : "like",
-                        )
-                      }
-                    >
-                      {reaction === "like" ? "♥" : "♡"} Like
-                    </button>
-                    <button
-                      className={`reaction dislike ${reaction === "dislike" ? "active" : ""}`}
-                      aria-pressed={reaction === "dislike"}
-                      disabled={feedbackBusy}
-                      onClick={() =>
-                        void saveReaction(
-                          current,
-                          reaction === "dislike" ? "neutral" : "dislike",
-                        )
-                      }
-                    >
-                      {reaction === "dislike" ? "✕" : "○"} Not for me
-                    </button>
-                  </div>
-                )}
-                {playback.duration !== null && playback.duration > 0 && (
-                  <div className="seek">
-                    <label htmlFor="seek" className="sr-only">
-                      Position
-                    </label>
-                    <span>{formatTime(playback.elapsed)}</span>
-                    <input
-                      id="seek"
-                      type="range"
-                      style={
-                        {
-                          "--fill": `${(Math.min(playback.elapsed, playback.duration) / playback.duration) * 100}%`,
-                        } as React.CSSProperties
-                      }
-                      min="0"
-                      max={playback.duration}
-                      value={Math.min(playback.elapsed, playback.duration)}
-                      onChange={(event) =>
-                        player.seek(Number(event.target.value))
-                      }
-                    />
-                    <span>{formatTime(playback.duration)}</span>
-                  </div>
-                )}
-              </>
-            )}
-            {(playback.error || playback.status === "needsGesture") && (
-              <p className="error-text" role="alert">
-                {playback.error || "Press Play to start listening."}
-              </p>
-            )}
-            {(current || isRadio(source)) && (
-              <div className="volume">
-                <button
-                  className="text-button"
-                  aria-label={playback.muted ? "Unmute" : "Mute"}
-                  onClick={() => player.toggleMute()}
-                >
-                  {playback.muted ? "Unmute" : "Mute"}
-                </button>
-                <label htmlFor="volume" className="sr-only">
-                  Volume
-                </label>
-                <input
-                  id="volume"
-                  type="range"
-                  style={
-                    {
-                      "--fill": `${playback.volume * 100}%`,
-                    } as React.CSSProperties
-                  }
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={playback.volume}
-                  onChange={(event) =>
-                    player.setVolume(Number(event.target.value))
-                  }
+          <div className="mode-switch" role="group" aria-label="Where the music comes from">
+            {tabs.map((option, index) => (
+              <button key={option.id} aria-pressed={tab === option.id} onClick={() => selectTab(option.id)}>
+                <span className="mode-index" aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {tab === "radio" ? (
+            <RadioPanel
+              selected={station}
+              onAir={onAirStation}
+              live={radioLive}
+              playing={playing}
+              metadata={metadata}
+              error={stationError}
+              dj={dj}
+              onTune={tuneIn}
+              onRetry={() => {
+                if (onAirStation) void listenRadio(onAirStation);
+              }}
+            />
+          ) : (
+            <>
+              <QueuePanel queue={queue} dj={dj} djPending={djPending} onPlay={playQueued} onDislike={(entry) => void dislikeQueued(entry)} onRemove={removeQueued} />
+              {tab === "local" && (
+                <CollectionPanel
+                  cap={cap}
+                  tracks={tracks}
+                  query={query}
+                  hasMore={Boolean(cursor)}
+                  error={libraryError}
+                  scanStatus={scanStatus}
+                  onQuery={setQuery}
+                  onScan={() => void scan()}
+                  onMore={() => void loadTracks(query, cursor)}
+                  onPlay={(item) => choose(item, "You")}
+                  onAdd={addQueue}
                 />
-              </div>
-            )}
-            {feedbackNotice && (
-              <p className="feedback-note" role="status">
-                {feedbackNotice.title}: {feedbackNotice.text}{" "}
-                {feedbackNotice.retry && (
-                  <button
-                    className="inline-button"
-                    onClick={feedbackNotice.retry}
-                  >
-                    Retry
-                  </button>
-                )}
-              </p>
-            )}
-          </section>
-
-          {!isRadio(source) && (
-            <section className="card" aria-labelledby="queue-heading">
-              <div className="section-label">UP NEXT</div>
-              <h2 id="queue-heading" className="sr-only">
-                Up next
-              </h2>
-              {!queue.length ? (
-                <p className="empty-state">
-                  {djPending
-                    ? "The DJ's picks will appear here."
-                    : dj
-                      ? "The DJ adds more as the music plays."
-                      : "Start the DJ and its picks line up here, each with a note on why."}
-                </p>
-              ) : (
-                <ol className="queue-list">
-                  {queue.map((entry) => (
-                    <li key={entry.media.id}>
-                      <div>
-                        <strong>{entry.media.title}</strong>
-                        <span>
-                          {entry.media.artist?.displayName ||
-                            entry.media.attribution ||
-                            "Artist unknown"}
-                          {entry.origin === "You" ? " · Added by you" : ""}
-                        </span>
-                        {entry.reason && <small>{entry.reason}</small>}
-                      </div>
-                      <div className="row-actions">
-                        <button
-                          className="inline-button"
-                          onClick={() => {
-                            updateQueue((entries) =>
-                              entries.filter(
-                                (other) => other.media.id !== entry.media.id,
-                              ),
-                            );
-                            choose(entry.media, false, entry.reason);
-                          }}
-                        >
-                          Play now
-                        </button>
-                        <button
-                          className="inline-button"
-                          aria-label={`Remove ${entry.media.title} from Up next`}
-                          onClick={() =>
-                            updateQueue((entries) =>
-                              entries.filter(
-                                (other) => other.media.id !== entry.media.id,
-                              ),
-                            )
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
               )}
-            </section>
-          )}
-
-          {source === "local" && (
-            <details className="card collection">
-              <summary>Browse your collection yourself</summary>
-              <div className="chooser-tools">
-                <label htmlFor="search" className="sr-only">
-                  Search your collection
-                </label>
-                <input
-                  id="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search by title or artist"
-                />
-                <button
-                  className="secondary-button"
-                  disabled={cap?.library.state === "not_configured"}
-                  onClick={() => void scan()}
-                >
-                  Rescan
-                </button>
-              </div>
-              {scanStatus && <p role="status">{scanStatus}</p>}
-              {libraryError && (
-                <p className="error-text" role="alert">
-                  {libraryError}
-                </p>
+              {notesArtist && (
+                <ArtistNotes name={notesArtist.displayName} data={artistData} expanded={artistExpanded} onExpand={() => setArtistExpanded((value) => !value)} onRetry={() => void retryArtist()} />
               )}
-              {!tracks.length && !libraryError && (
-                <p className="empty-state">
-                  {cap?.library.state === "not_configured"
-                    ? "Set MUSIC_LIBRARY_ROOT to your MP3 folder and restart the server. Setup shows how."
-                    : !cap
-                      ? "Checking your collection…"
-                      : cap.library.state === "ready" ||
-                          cap.library.state === "scanning"
-                        ? "No MP3s found. Rescan your folder or check Setup."
-                        : "Your collection isn't available. Check Setup."}
-                </p>
-              )}
-              {!!tracks.length && (
-                <ul className="catalog-list">
-                  {tracks.map((item) => (
-                    <li key={item.id}>
-                      <div>
-                        <strong>{item.title}</strong>
-                        <span>
-                          {item.artist?.displayName || "Artist unknown"}
-                          {item.availability === "unavailable"
-                            ? " · Unavailable"
-                            : ""}
-                        </span>
-                      </div>
-                      <div className="row-actions">
-                        <button
-                          className="inline-button"
-                          disabled={item.availability !== "available"}
-                          onClick={() => choose(item)}
-                        >
-                          Play now
-                        </button>
-                        <button
-                          className="inline-button"
-                          disabled={item.availability !== "available"}
-                          onClick={() => addQueue(item)}
-                        >
-                          Add to Up next
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {cursor && (
-                <button
-                  className="secondary-button more-button"
-                  onClick={() => void loadTracks(query, cursor)}
-                >
-                  Load more
-                </button>
-              )}
-            </details>
+            </>
           )}
         </div>
-
-        <aside className="side">
-          <section
-            className="card artist-panel"
-            aria-labelledby="artist-heading"
-          >
-            <div className="section-label">BEHIND THE MUSIC</div>
-            <h2 id="artist-heading">
-              {isRadio(source)
-                ? labels[source]
-                : current?.artist?.displayName || "Artist notes"}
-            </h2>
-            {isRadio(source) ? (
-              <>
-                <p>{stationNotes[source]}</p>
-                <p><a href={stationCatalog[source].website} target="_blank" rel="noreferrer">Visit {labels[source]}</a></p>
-              </>
-            ) : !current ? (
-              <p>Notes about the artist appear here while their music plays.</p>
-            ) : !current.artist || current.artist.confidence === "low" ? (
-              <p>
-                {source === "youtube"
-                  ? "Artist notes are written for tracks from your collection, where the artist is known from the file's tags."
-                  : "This file doesn't name its artist, so there are no notes for it."}
-              </p>
-            ) : !artistData || artistData.status === "pending" ? (
-              <p>Writing artist notes…</p>
-            ) : artistData.status === "cached" ? (
-              <>
-                <p>{artistData.introduction}</p>
-                {artistExpanded && artistData.text && (
-                  <p className="long-copy">{artistData.text}</p>
-                )}
-                {artistData.text && (
-                  <button
-                    className="inline-button"
-                    aria-expanded={artistExpanded}
-                    onClick={() => setArtistExpanded((value) => !value)}
-                  >
-                    {artistExpanded ? "Read less" : "Read more"}
-                  </button>
-                )}
-                <p className="provenance">
-                  Written by AI ·{" "}
-                  {artistData.generatedAt
-                    ? new Date(artistData.generatedAt).toLocaleDateString()
-                    : "recently"}
-                </p>
-              </>
-            ) : artistData.status === "unavailable" ? (
-              <p>Artist notes are unavailable for this artist.</p>
-            ) : (
-              <p>
-                Artist notes couldn’t load. The music keeps playing.{" "}
-                <button
-                  className="inline-button"
-                  onClick={() => void retryArtist()}
-                >
-                  Retry
-                </button>
-              </p>
-            )}
-          </section>
-          <section className="card how-it-works" aria-labelledby="how-heading">
-            <div className="section-label">HOW THE DJ LEARNS</div>
-            <h2 id="how-heading">Like what you hear</h2>
-            <p>
-              Like or pass on anything that plays. The DJ remembers and uses
-              your taste for every pick, on YouTube and in your collection.
-            </p>
-            <button
-              className="inline-button"
-              onClick={(event) => openPanel("taste", event)}
-            >
-              See what the DJ knows about your taste
-            </button>
-          </section>
-        </aside>
       </main>
+      {/* The player and its notices stay docked at the bottom of the window. */}
+      <div className="dock" ref={dock}>
+        {toast && (
+          <div className="toast" role="status">
+            <span>{toast.text}</span>
+            {toast.action && (
+              <button
+                className="inline-button"
+                onClick={() => {
+                  toast.action?.run();
+                  setToast(null);
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
+          </div>
+        )}
+        <PlayerBar
+          now={now}
+          playback={playback}
+          reaction={reaction}
+          radioLive={radioLive}
+          stationPending={stationPending}
+          stationError={stationError}
+          metadata={metadata}
+          canSkip={Boolean(track) && (queue.length > 0 || dj)}
+          canReturnToDj={dj}
+          message={playerMessage}
+          onToggle={togglePlay}
+          onSkip={skip}
+          onLike={() => void toggleLike()}
+          onNotForMe={() => void notForMe()}
+          onBackToDj={backToDj}
+          onSeek={(seconds) => player.seek(seconds)}
+          onVolume={(value) => player.setVolume(value)}
+          onMute={() => player.toggleMute()}
+        />
+      </div>
       {panel && (
-        <dialog
-          ref={dialog}
-          aria-label={panel === "setup" ? "Setup" : "Your taste"}
-        >
+        <dialog ref={dialog} aria-label={panel === "setup" ? "Setup" : "Your taste"}>
           <div className="dialog-header">
             <h2>{panel === "setup" ? "Setup" : "Your taste"}</h2>
-            <button
-              className="text-button"
-              onClick={() => dialog.current?.close()}
-            >
+            <button className="text-button" onClick={() => dialog.current?.close()}>
               Close
             </button>
           </div>
           {panel === "setup" ? (
-            <div className="setup-content">
-              <h3>The DJ (Codex)</h3>
-              <p className={cap?.codex.state === "ready" ? "ok-text" : ""}>
-                {cap?.codex.state === "ready"
-                  ? "Ready. The DJ uses your existing Codex login."
-                  : describeReason(cap?.codex.reason) || "Checking Codex…"}
-              </p>
-              <p className="subtle">
-                Uses the Codex login in{" "}
-                <code>
-                  {cap?.codex.authHomeSource === "user_home"
-                    ? "~/.codex"
-                    : cap?.codex.authHomeSource || "your Codex home"}
-                </code>
-                . Your likes and taste notes are sent to Codex when the DJ
-                picks; your plan's usage limits apply.
-              </p>
-              <h3>YouTube</h3>
-              <p>
-                {cap?.youtubeDiscovery.state === "ready"
-                  ? "Ready. The DJ searches YouTube for you. No API key needed."
-                  : cap?.youtubeDiscovery.reason === cap?.codex.reason
-                    ? "Works once the DJ above is ready. No API key needed."
-                    : describeReason(cap?.youtubeDiscovery.reason) ||
-                      "The DJ can't search YouTube yet."}
-              </p>
-              <h3>Your collection</h3>
-              <p>
-                {cap?.library.state === "ready"
-                  ? "Ready."
-                  : cap?.library.state === "not_configured"
-                    ? "Not set up."
-                    : cap?.library.state || "Checking…"}{" "}
-                Set <code>MUSIC_LIBRARY_ROOT</code> to your MP3 folder, restart
-                the server, then use Rescan under Your collection.{" "}
-                {cap?.library.state !== "not_configured" && cap?.library.reason}
-              </p>
-              <h3>Live radio</h3>
-              {stations.map((id) => (
-                <p key={id}>
-                  <strong>{labels[id]}:</strong>{" "}
-                  {cap?.stations[id].state || "unknown"}{" "}
-                  {cap?.stations[id].reason}
-                </p>
-              ))}
-              <button
-                className="secondary-button"
-                onClick={() => void refreshCapabilities()}
-              >
-                Check again
-              </button>
-            </div>
+            <SetupContent cap={cap} onRefresh={() => void refreshCapabilities()} />
           ) : (
-            <div className="setup-content">
-              <p>
-                Like and Not for me save your reactions. The DJ uses them for
-                every pick. Press a selected button again to undo it.
-              </p>
-              {tasteData ? (
-                <>
-                  <p className="subtle">
-                    {Object.keys(tasteData.feedback).length} reactions saved ·
-                    taste notes{" "}
-                    {summaryUnavailable
-                      ? "waiting for the DJ"
-                      : tasteData.summaryStatus}
-                  </p>
-                  {summaryUnavailable ? (
-                    <p>
-                      Your reactions are saved. The DJ writes your taste notes
-                      once Codex is available. See{" "}
-                      <button
-                        className="inline-button"
-                        onClick={() => setPanel("setup")}
-                      >
-                        Setup
-                      </button>
-                      .
-                    </p>
-                  ) : (
-                    tasteData.summaryStatus === "pending" && (
-                      <p>
-                        Reactions saved. The DJ is updating your taste notes.
-                      </p>
-                    )
-                  )}
-                  {tasteData.summaryStatus === "failed" && (
-                    <p className="error-text">
-                      Updating your taste notes failed. Your reactions are still
-                      saved.
-                    </p>
-                  )}
-                  {tasteData.summaryMarkdown ? (
-                    <div className="taste-summary">
-                      {tasteData.summaryMarkdown}
-                    </div>
-                  ) : (
-                    <p>No taste notes yet. Like a few tracks to get started.</p>
-                  )}
-                </>
-              ) : (
-                <p>
-                  Your taste data is unavailable. Check that the server is
-                  running.
-                </p>
-              )}
-            </div>
+            <TasteContent taste={tasteData} memory={memory} codexReady={cap?.codex.state === "ready"} onForget={(id) => void forgetNote(id)} onSetup={() => setPanel("setup")} />
           )}
         </dialog>
       )}

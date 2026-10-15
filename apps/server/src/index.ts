@@ -1,29 +1,36 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { Readable } from 'node:stream';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { JobRegistry } from './jobs.js';
-import { capabilities, stationId, mediaId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, type Capabilities } from '@music/contracts';
+import { capabilities, stationId, mediaId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, djMessageRequest, listeningEvent, type Capabilities } from '@music/contracts';
 import { LibraryService, LibraryError, parseRange } from './library.js';
 import { stationDescriptors, resolveStation } from './stations.js';
 import { StationNowPlayingService } from './station-now-playing.js';
 import { YoutubeService, YoutubeProviderError, parseVideoId, youtubeItem } from './youtube.js';
+import { YtDlp } from './ytdlp.js';
 import { TasteRepository, TasteError } from './taste.js';
 import { CodexRunner } from './codex.js';
 import { DjService } from './dj.js';
+import { DjMemory } from './memory.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie'] }, bodyLimit: 64 * 1024 });
 const jobs = new JobRegistry();
 const library = new LibraryService(config.libraryRoot, config.dataDir);
 await library.initialize();
-const youtube = new YoutubeService();
+const ytdlp = new YtDlp({ toolsDir: join(config.dataDir, 'tools'), binary: config.ytdlpBin });
+void ytdlp.start();
+const youtube = new YoutubeService(ytdlp);
 const stationMetadata = new StationNowPlayingService(fetch, Date.now, config.stationOverrides);
 const tasteRepository = await TasteRepository.open(config.dataDir);
 const codex = await CodexRunner.create(config);
-const dj = new DjService(codex, library, youtube, tasteRepository, config.dataDir);
+const memory = await DjMemory.open(config.dataDir);
+const dj = new DjService(codex, library, youtube, tasteRepository, config.dataDir, memory);
 const artistJobs = new Map<string,string>();
 const sessionJobs = new Map<string,string>();
 let synthesisJobId: string | null = null;
@@ -45,8 +52,9 @@ if (tasteRepository.snapshot().summaryStatus === 'pending') scheduleSynthesis();
 const capabilitySnapshot = (): Capabilities => capabilities.parse({
   library: library.state,
   codex: { ...codex.capability, synthesisStatus: codex.capability.state === 'ready' ? tasteRepository.snapshot().summaryStatus : 'unavailable' },
-  youtubeDiscovery: codex.discoveryCapability.state === 'ready' && youtube.failure ? {state:'unavailable',reason:youtube.failure} : codex.discoveryCapability,
-  youtubeEmbed: { state: 'ready' },
+  // The DJ needs Codex to choose music and yt-dlp to find it on YouTube.
+  youtubeDiscovery: codex.capability.state !== 'ready' ? { state: codex.capability.state, reason: codex.capability.reason } : ytdlp.state.state !== 'ready' ? { state: ytdlp.state.state, reason: ytdlp.state.reason } : { state: 'ready' },
+  youtubePlayback: ytdlp.state,
   stations: Object.fromEntries(stationDescriptors().map(station => [station.stationId, { state: station.availability }])),
 });
 function fail(code: string, message: string, status: number, requestId: string, retryable = false) { return { status, body: { error: { code, message, retryable, requestId } } }; }
@@ -93,14 +101,29 @@ async function streamLocal(request: FastifyRequest, reply: FastifyReply) {
   return reply.send(stream);
 }
 app.get('/api/v1/media/local/:id', streamLocal);
+// YouTube audio is streamed through the server: the browser's range requests
+// go to the stream URL yt-dlp found, which only this machine may fetch.
+app.get('/api/v1/media/youtube/:videoId', async (request, reply) => {
+  const { videoId } = z.object({ videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/) }).parse(request.params);
+  const upstream = new AbortController();
+  reply.raw.on('close', () => upstream.abort());
+  const { response, stream } = await youtube.open(videoId, typeof request.headers.range === 'string' ? request.headers.range : undefined, upstream.signal);
+  const type = response.headers.get('content-type');
+  reply.code(response.status).header('Content-Type', type?.startsWith('audio/') ? type : stream.mimeType).header('Accept-Ranges', 'bytes').header('Cache-Control', 'no-store');
+  for (const name of ['content-length', 'content-range']) { const value = response.headers.get(name); if (value) reply.header(name, value); }
+  if (request.method === 'HEAD' || !response.body) { await response.body?.cancel().catch(() => {}); return reply.send(); }
+  // fetch's body type differs from stream/web's in @types/node, though they are the same object.
+  return reply.send(Readable.fromWeb(response.body as NodeReadableStream));
+});
 app.post('/api/v1/youtube/resolve', async request => {
   const { input } = youtubeResolveRequest.parse(request.body);
   let id: string; try { id = parseVideoId(input); } catch { throw new LibraryError('invalid_youtube_url', 400); }
   return youtubeItem(id);
 });
+const youtubeNotReady = (requestId: string) => fail(ytdlp.state.reason ?? 'ytdlp_unavailable', 'YouTube is not ready yet. Check Setup.', 503, requestId, true);
 app.post('/api/v1/youtube/search', async (request, reply) => {
   const { q } = youtubeSearchQuery.parse(request.body);
-  if (!codex.canAttemptDiscovery) return reply.code(503).send(fail(codex.discoveryCapability.reason ?? 'provider_unavailable','YouTube discovery is unavailable. Paste a link to keep listening.',503,request.id).body);
+  if (ytdlp.state.state !== 'ready') { const e = youtubeNotReady(request.id); return reply.code(e.status).send(e.body); }
   const searchJob = jobs.start('youtubeSearch', signal => dj.searchYoutube(q,signal));
   return reply.code(202).send({jobId:searchJob.id});
 });
@@ -130,13 +153,33 @@ app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
 app.post('/api/v1/dj/recommendations', async (request, reply) => {
   const input = recommendationRequest.parse(request.body);
   if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Your existing Codex login is unavailable.', 503, request.id).body);
-  if (input.source === 'youtube' && !codex.canAttemptDiscovery) return reply.code(503).send(fail(codex.discoveryCapability.reason ?? 'provider_unavailable', 'YouTube discovery is unavailable. Paste a link to keep listening.',503,request.id).body);
+  if (input.source === 'youtube' && ytdlp.state.state !== 'ready') { const e = youtubeNotReady(request.id); return reply.code(e.status).send(e.body); }
   const previous = sessionJobs.get(input.sessionId);
   if (previous) jobs.cancel(previous);
   const job = jobs.start('recommendations', signal => dj.recommend(input, signal));
   sessionJobs.set(input.sessionId,job.id);
   void jobs.settled(job.id).then(() => { if (sessionJobs.get(input.sessionId) === job.id) sessionJobs.delete(input.sessionId); });
   return reply.code(202).send({ jobId: job.id });
+});
+// The DJ conversation, and the notes the DJ keeps from it.
+app.get('/api/v1/dj/memory', async () => memory.snapshot());
+app.post('/api/v1/dj/messages', async (request, reply) => {
+  const input = djMessageRequest.parse(request.body);
+  if (input.mode === 'chat' && !input.text) return reply.code(400).send(fail('invalid_request', 'Write a message for the DJ.', 400, request.id).body);
+  if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Your existing Codex login is unavailable.', 503, request.id).body);
+  const job = jobs.start('converse', signal => dj.converse(input, signal));
+  return reply.code(202).send({ jobId: job.id });
+});
+app.delete('/api/v1/dj/notes/:id', async request => {
+  const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+  await memory.removeNote(id);
+  return memory.snapshot();
+});
+app.delete('/api/v1/dj/conversation', async () => { await memory.clearConversation(); return memory.snapshot(); });
+// Skips and finished tracks, which the DJ uses alongside likes and dislikes.
+app.post('/api/v1/listening', async (request, reply) => {
+  await memory.recordPlay(listeningEvent.parse(request.body));
+  return reply.code(204).send();
 });
 app.get('/api/v1/artists/:key/info', async request => {
   const { key } = z.object({ key:z.string().min(1).max(200) }).parse(request.params);
@@ -167,5 +210,5 @@ app.post('/api/v1/stations/:id/resolve', async request => resolveStation(config,
 app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/')) return reply.code(404).send(fail('not_found', 'API route not found.', 404, request.id).body); return reply.code(404).send('Not found'); });
 const webDist = resolve(import.meta.dirname, '../../web/dist');
 if (existsSync(webDist)) await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: false });
-app.addHook('onClose', async () => { await jobs.stop(); await codex.stop(); await tasteRepository.close(); });
+app.addHook('onClose', async () => { ytdlp.stop(); await jobs.stop(); await codex.stop(); await tasteRepository.close(); });
 try { await app.listen({ port: config.port, host: '127.0.0.1' }); } catch (error) { app.log.error(error); process.exitCode = 1; }
