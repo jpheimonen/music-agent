@@ -16,6 +16,9 @@ import {
 } from "@music/contracts";
 import { api, json, ApiFailure } from "./api";
 import { PlaybackController, type PlaybackState } from "./playback";
+import "@fontsource-variable/archivo/wdth.css";
+import "@fontsource-variable/archivo/wdth-italic.css";
+import "@fontsource/silkscreen/latin-400.css";
 import "./style.css";
 
 type Source = "local" | "youtube" | "kexp" | "yle1" | "radio-helsinki";
@@ -614,6 +617,19 @@ function App() {
       if (request === stationRequest.current) setStationPending(false);
     }
   };
+  // Picking a station starts it. Picking the one already on air leaves it
+  // playing instead of reconnecting.
+  const tuneIn = (id: Station) => {
+    if (
+      id === sourceRef.current &&
+      (stationPending ||
+        playback.status === "playing" ||
+        playback.status === "loading")
+    )
+      return;
+    changeSource(id);
+    void listenRadio();
+  };
   const stopRadio = () => {
     stationRequest.current++;
     setStationPending(false);
@@ -750,12 +766,39 @@ function App() {
     tasteData?.summaryStatus === "pending" && cap?.codex.state !== "ready";
   const playing = playback.status === "playing";
   const radioLive = stationPending || playing || playback.status === "loading";
+  const currentArtist =
+    current?.artist?.displayName || current?.attribution || "Artist unknown";
+  // The ticker repeats what the page already says, so screen readers skip it.
+  const ticker = isRadio(source)
+    ? [
+        playing ? "On air" : radioLive ? "Tuning in" : "Live radio",
+        labels[source],
+        stationNotes[source],
+      ]
+    : current
+      ? [playing ? "Now playing" : "Up now", current.title, currentArtist]
+      : dj
+        ? ["The DJ is on", "Picking your first track"]
+        : ["Tell the DJ what you want", "YouTube", "Your collection", "Live radio"];
+  const sticker = isRadio(source)
+    ? playing
+      ? "On air!"
+      : "Live!"
+    : dj
+      ? "DJ on!"
+      : "AI DJ";
 
   return (
     <div className="app-shell">
       <header className="site-header">
-        <div className="wordmark">
-          Listening room<span>.</span>
+        <div className="brand">
+          <div className="wordmark">
+            Listening <span>room</span>
+            <sup aria-hidden="true">®</sup>
+          </div>
+          <p className="tagline" aria-hidden="true">
+            AI DJ system // Series 2K
+          </p>
         </div>
         <nav aria-label="App">
           <button
@@ -783,6 +826,19 @@ function App() {
           </label>
         </nav>
       </header>
+      <div className="ticker" aria-hidden="true">
+        <div className="ticker-track">
+          {[0, 1].map((copy) => (
+            <div className="ticker-copy" key={copy}>
+              {[0, 1, 2].flatMap((round) =>
+                ticker.map((text, index) => (
+                  <span key={`${round}-${index}`}>{text}</span>
+                )),
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
       <span className="sr-only" role="status">
         {announcement}
       </span>
@@ -803,6 +859,9 @@ function App() {
       <main className="layout">
         <div className="stage">
           <section className="booth card" aria-labelledby="booth-heading">
+            <div className="sticker" aria-hidden="true">
+              <span>{sticker}</span>
+            </div>
             <div className="booth-top">
               <div className="eyebrow">YOUR AI DJ</div>
               <div
@@ -814,18 +873,27 @@ function App() {
                   aria-pressed={source === "youtube"}
                   onClick={() => changeSource("youtube")}
                 >
+                  <span className="mode-index" aria-hidden="true">
+                    01
+                  </span>
                   YouTube
                 </button>
                 <button
                   aria-pressed={source === "local"}
                   onClick={() => changeSource("local")}
                 >
+                  <span className="mode-index" aria-hidden="true">
+                    02
+                  </span>
                   Your collection
                 </button>
                 <button
                   aria-pressed={isRadio(source)}
                   onClick={() => changeSource(lastStation.current)}
                 >
+                  <span className="mode-index" aria-hidden="true">
+                    03
+                  </span>
                   Live radio
                 </button>
               </div>
@@ -833,31 +901,52 @@ function App() {
             {isRadio(source) ? (
               <>
                 <h1 id="booth-heading" className="booth-heading">
-                  Tune in live
+                  Tune in <em>live</em>
                 </h1>
                 <p className="subtle">
-                  Real stations, real hosts. The DJ takes a break while you
-                  listen.
+                  Real stations, real hosts. Pick one and it starts playing.
+                  The DJ takes a break while you listen.
                 </p>
                 <div className="station-list">
-                  {stations.map((id) => (
-                    <button
-                      key={id}
-                      className="station"
-                      aria-pressed={source === id}
-                      onClick={() => changeSource(id)}
-                    >
-                      <strong>{labels[id]}</strong>
-                      <span>{stationNotes[id]}</span>
-                    </button>
-                  ))}
+                  {stations.map((id, index) => {
+                    const onAir = source === id && playing;
+                    return (
+                      <button
+                        key={id}
+                        className={`station ${onAir ? "on-air" : ""}`}
+                        aria-pressed={source === id}
+                        onClick={() => tuneIn(id)}
+                      >
+                        <span className="station-preset" aria-hidden="true">
+                          Preset 0{index + 1}
+                        </span>
+                        <strong>{labels[id]}</strong>
+                        <span className="station-note">{stationNotes[id]}</span>
+                        {source === id && radioLive && (
+                          <span className="station-live">
+                            {onAir && (
+                              <span className="eq" aria-hidden="true">
+                                <i />
+                                <i />
+                                <i />
+                                <i />
+                              </span>
+                            )}
+                            {onAir ? "On air" : "Tuning in…"}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             ) : dj ? (
               <>
                 <h1 id="booth-heading" className="booth-heading">
                   <span className="live-dot" aria-hidden="true" />
-                  The DJ is on
+                  <span>
+                    The DJ is <em>on</em>
+                  </span>
                 </h1>
                 <p className="subtle">
                   Picking from{" "}
@@ -903,7 +992,7 @@ function App() {
             ) : (
               <>
                 <h1 id="booth-heading" className="booth-heading">
-                  What should we listen to?
+                  What should we <em>listen</em> to?
                 </h1>
                 <p className="subtle">
                   {source === "youtube"
@@ -993,19 +1082,26 @@ function App() {
             )}
           </section>
 
-          <section className="now-playing card" aria-labelledby="now-heading">
-            <div className="section-label" id="now-heading">
-              NOW PLAYING
+          <section
+            className={`now-playing card ${playing ? "is-playing" : ""}`}
+            aria-labelledby="now-heading"
+          >
+            <div className="lcd">
+              <div className="section-label" id="now-heading">
+                NOW PLAYING
+              </div>
+              <span className="eq" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
+              </span>
             </div>
             {isRadio(source) ? (
               <div className="radio-now">
                 <div className="track-identity">
-                  <div
-                    className={`artwork-fallback ${playing ? "on-air" : ""}`}
-                    aria-hidden="true"
-                  >
-                    ◉
-                  </div>
+                  <div className="disc" aria-hidden="true" />
                   <div>
                     <p className="state-line">
                       {playing
@@ -1063,9 +1159,7 @@ function App() {
                   {current?.artwork && source === "local" ? (
                     <img className="artwork" src={current.artwork} alt="" />
                   ) : (
-                    <div className="artwork-fallback" aria-hidden="true">
-                      ♪
-                    </div>
+                    <div className="disc" aria-hidden="true" />
                   )}
                   <div>
                     <h2 className="track-title">
@@ -1073,9 +1167,7 @@ function App() {
                     </h2>
                     <p className="artist-name">
                       {current
-                        ? current.artist?.displayName ||
-                          current.attribution ||
-                          "Artist unknown"
+                        ? currentArtist
                         : dj
                           ? "Your first pick starts as soon as the DJ has it."
                           : "Ask the DJ above and it will start the music."}
@@ -1127,7 +1219,7 @@ function App() {
                       {reaction === "like" ? "♥" : "♡"} Like
                     </button>
                     <button
-                      className={`reaction ${reaction === "dislike" ? "active" : ""}`}
+                      className={`reaction dislike ${reaction === "dislike" ? "active" : ""}`}
                       aria-pressed={reaction === "dislike"}
                       disabled={feedbackBusy}
                       onClick={() =>
@@ -1150,6 +1242,11 @@ function App() {
                     <input
                       id="seek"
                       type="range"
+                      style={
+                        {
+                          "--fill": `${(Math.min(playback.elapsed, playback.duration) / playback.duration) * 100}%`,
+                        } as React.CSSProperties
+                      }
                       min="0"
                       max={playback.duration}
                       value={Math.min(playback.elapsed, playback.duration)}
@@ -1182,6 +1279,11 @@ function App() {
                 <input
                   id="volume"
                   type="range"
+                  style={
+                    {
+                      "--fill": `${playback.volume * 100}%`,
+                    } as React.CSSProperties
+                  }
                   min="0"
                   max="1"
                   step="0.01"
