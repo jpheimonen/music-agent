@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "The station click now autoplays, and the README or the knowledge UX notes may describe the old radio flow, so I'll check them for outdated text.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The saved build already passed on this exact checkout during the fast checks, including the bundled fonts.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Earlier browser checks on the final build already cover station autoplay, desktop and phone layouts in both themes, and the 0px overflow fix. No code has changed since.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "No server or shared code changed, and the web adapter tests and typecheck passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "Two new npm dependencies were added and the lockfile was edited by hand, so the scanners should look at them.",
+    "command": "taiga static-checks"
+  }
+]

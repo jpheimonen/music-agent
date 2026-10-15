@@ -1,0 +1,30 @@
+# Security scanner findings this repository treats as false positives.
+# `taiga static-checks` skips them. See docs/static-checks.md in Taiga.
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "5cf8ff7cbd35"
+location = "apps/server/src/codex.ts:242"
+reason = "Each setTimeout receives an arrow-function callback and a fixed numeric delay, never a string, so no untrusted data can be evaluated."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "3c2fee6fbeb7"
+location = "apps/server/src/codex.ts:265"
+reason = "Each setTimeout receives an arrow-function callback and a fixed numeric delay, never a string, so no untrusted data can be evaluated."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS172411"
+id = "75e088288033"
+location = "apps/web/src/playback.ts:386"
+reason = "Each setTimeout receives an arrow-function callback and a fixed numeric delay, never a string, so no untrusted data can be evaluated."
+
+[[ignore]]
+scanner = "devskim"
+rule = "DS162092"
+id = "723fb247070d"
+location = "apps/web/package.json:1"
+reason = "DS162092 matches the 'dev' script (vite dev server) in apps/web/package.json, which existed before this change and is not part of the shipped build; the build runs tsc and vite build only."
