@@ -19,48 +19,12 @@ export type PlaybackState = {
   epoch: number;
 };
 type Listener = (state: PlaybackState) => void;
-type YoutubePlayer = {
-  playVideo(): void;
-  pauseVideo(): void;
-  stopVideo(): void;
-  destroy(): void;
-  setVolume(value: number): void;
-  mute(): void;
-  unMute(): void;
-  getCurrentTime(): number;
-  getDuration(): number;
-  seekTo(value: number, allowSeekAhead: boolean): void;
-};
-type YoutubeApi = {
-  Player: new (
-    element: HTMLElement,
-    options: Record<string, unknown>,
-  ) => YoutubePlayer;
-};
-declare global {
-  interface Window {
-    YT?: YoutubeApi;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-let youtubeReady: Promise<YoutubeApi> | undefined;
-function loadYoutube(): Promise<YoutubeApi> {
-  if (window.YT?.Player) return Promise.resolve(window.YT);
-  if (!youtubeReady)
-    youtubeReady = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://www.youtube.com/iframe_api";
-      script.onerror = () =>
-        reject(new Error("YouTube player could not load."));
-      window.onYouTubeIframeAPIReady = () =>
-        window.YT
-          ? resolve(window.YT)
-          : reject(new Error("YouTube player could not load."));
-      document.head.append(script);
-    });
-  return youtubeReady;
-}
+// Collection files and YouTube audio both stream from the local server.
+export const mediaUrl = (item: MediaItem) =>
+  item.source === "youtube"
+    ? `/api/v1/media/youtube/${encodeURIComponent(item.id.slice("youtube:".length))}`
+    : `/api/v1/media/local/${encodeURIComponent(item.id)}`;
+export const trackFailed = "This track couldn't be played.";
 
 export class PlaybackController {
   private state: PlaybackState = {
@@ -74,14 +38,10 @@ export class PlaybackController {
   private listeners = new Set<Listener>();
   private audio: HTMLAudioElement | null = null;
   private hls: Hls | null = null;
-  private youtube: YoutubePlayer | null = null;
-  private youtubeHost: HTMLElement | null = null;
-  private pendingVideo: string | null = null;
-  private timer: number | null = null;
   private timeout: number | null = null;
   private onEnded: (() => void) | null = null;
-  private activeKind: "audio" | "youtube" | null = null;
   private activeItemId: string | null = null;
+  private reconnects = 0;
   private lockRelease: (() => void) | null = null;
   private lockHeld = false;
 
@@ -139,12 +99,7 @@ export class PlaybackController {
   stop() {
     const epoch = this.state.epoch + 1;
     if (this.timeout !== null) window.clearTimeout(this.timeout);
-    if (this.timer !== null) window.clearInterval(this.timer);
-    this.timeout = this.timer = null;
-    this.pendingVideo = null;
-    this.youtube?.stopVideo();
-    this.youtube?.destroy();
-    this.youtube = null;
+    this.timeout = null;
     this.hls?.stopLoad();
     this.hls?.destroy();
     this.hls = null;
@@ -155,7 +110,6 @@ export class PlaybackController {
       this.audio = null;
     }
     this.lockRelease?.();
-    this.activeKind = null;
     this.activeItemId = null;
     this.update({
       epoch,
@@ -166,12 +120,7 @@ export class PlaybackController {
     });
     return epoch;
   }
-  setYoutubeHost(host: HTMLElement | null) {
-    this.youtubeHost = host;
-    if (host && this.pendingVideo)
-      void this.mountYoutube(this.pendingVideo, this.state.epoch);
-  }
-  private audioEvents(audio: HTMLAudioElement, epoch: number) {
+  private audioEvents(audio: HTMLAudioElement, epoch: number, trackUrl?: string) {
     audio.addEventListener("playing", () => {
       if (this.valid(epoch) && this.state.status !== "failed") {
         if (this.timeout !== null) window.clearTimeout(this.timeout);
@@ -198,15 +147,44 @@ export class PlaybackController {
       }
     });
     audio.addEventListener("error", () => {
-      if (this.valid(epoch))
-        this.update({
-          status: "failed",
-          error:
-            "This audio could not be played. Choose another item or try again.",
-        });
+      if (!this.valid(epoch) || (trackUrl && this.reconnect(audio, epoch, trackUrl)))
+        return;
+      this.update({
+        status: "failed",
+        error: trackUrl
+          ? trackFailed
+          : "The live stream stopped. Try Listen live again.",
+      });
     });
   }
-  async playLocal(item: MediaItem) {
+  // A connection that drops mid-track reloads the stream where it stopped.
+  private reconnect(audio: HTMLAudioElement, epoch: number, url: string) {
+    const position = audio.currentTime;
+    if (this.reconnects >= 2 || !position) return false;
+    this.reconnects++;
+    audio.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (this.valid(epoch)) audio.currentTime = position;
+      },
+      { once: true },
+    );
+    audio.src = url;
+    this.update({ status: "loading", error: undefined });
+    this.failIfStalled(audio, epoch);
+    void this.playAudio(audio, epoch);
+    return true;
+  }
+  private failIfStalled(audio: HTMLAudioElement, epoch: number) {
+    if (this.timeout !== null) window.clearTimeout(this.timeout);
+    this.timeout = window.setTimeout(() => {
+      if (this.valid(epoch) && this.state.status === "loading") {
+        audio.pause();
+        this.update({ status: "failed", error: trackFailed });
+      }
+    }, 30000);
+  }
+  async playTrack(item: MediaItem) {
     const epoch = this.stop();
     if (!(await this.ownPlayback(epoch)) || !this.valid(epoch)) {
       if (this.valid(epoch))
@@ -216,16 +194,17 @@ export class PlaybackController {
         });
       return;
     }
-    const audio = new Audio(
-      `/api/v1/media/local/${encodeURIComponent(item.id)}`,
-    );
+    const url = mediaUrl(item);
+    const audio = new Audio(url);
+    audio.preload = "auto";
     this.audio = audio;
-    this.activeKind = "audio";
     this.activeItemId = item.id;
+    this.reconnects = 0;
     audio.volume = this.state.volume;
     audio.muted = this.state.muted;
-    this.audioEvents(audio, epoch);
-    this.update({ status: "loading" });
+    this.audioEvents(audio, epoch, url);
+    this.update({ status: "loading", duration: item.durationSeconds ?? null });
+    this.failIfStalled(audio, epoch);
     await this.playAudio(audio, epoch);
   }
   async playStation(resolution: StationResolution) {
@@ -240,7 +219,6 @@ export class PlaybackController {
     }
     const audio = new Audio();
     this.audio = audio;
-    this.activeKind = "audio";
     audio.volume = this.state.volume;
     audio.muted = this.state.muted;
     this.audioEvents(audio, epoch);
@@ -320,127 +298,33 @@ export class PlaybackController {
       });
     }
   }
-  async playYoutube(item: MediaItem) {
-    const epoch = this.stop();
-    if (!(await this.ownPlayback(epoch)) || !this.valid(epoch)) {
-      if (this.valid(epoch))
-        this.update({
-          status: "failed",
-          error: "Another tab is playing. Stop it before playing here.",
-        });
-      return;
-    }
-    this.activeKind = "youtube";
-    this.activeItemId = item.id;
-    this.pendingVideo = item.id.slice(8);
-    this.update({ status: "loading" });
-    if (this.youtubeHost) await this.mountYoutube(this.pendingVideo, epoch);
-  }
-  private async mountYoutube(videoId: string, epoch: number) {
-    const host = this.youtubeHost;
-    if (!host) return;
-    try {
-      const YT = await loadYoutube();
-      if (!this.valid(epoch) || host !== this.youtubeHost) return;
-      host.replaceChildren();
-      const target = document.createElement("div");
-      host.append(target);
-      this.youtube = new YT.Player(target, {
-        width: "100%",
-        height: "100%",
-        videoId,
-        playerVars: { controls: 1, playsinline: 1, origin: location.origin },
-        events: {
-          onReady: () => {
-            if (!this.valid(epoch)) return;
-            this.youtube?.setVolume(Math.round(this.state.volume * 100));
-            if (this.state.muted) this.youtube?.mute();
-            this.youtube?.playVideo();
-            this.timer = window.setInterval(() => {
-              if (this.valid(epoch) && this.youtube)
-                this.update({
-                  elapsed: this.youtube.getCurrentTime() || 0,
-                  duration: this.youtube.getDuration() || null,
-                });
-            }, 1000);
-          },
-          onStateChange: (event: { data: number }) => {
-            if (!this.valid(epoch)) return;
-            if (event.data === 1)
-              this.update({ status: "playing", error: undefined });
-            if (event.data === 2) this.update({ status: "paused" });
-            if (event.data === 0) {
-              this.update({ status: "ended" });
-              this.onEnded?.();
-            }
-          },
-          onError: () => {
-            if (this.valid(epoch))
-              this.update({
-                status: "failed",
-                error: "This video cannot be played here. Choose another.",
-              });
-          },
-        },
-      });
-      this.timeout = window.setTimeout(() => {
-        if (this.valid(epoch) && this.state.status === "loading")
-          this.update({
-            status: "needsGesture",
-            error: "Press Play in the video or below to start.",
-          });
-      }, 12000);
-    } catch (error) {
-      if (this.valid(epoch))
-        this.update({
-          status: "failed",
-          error:
-            error instanceof Error
-              ? error.message
-              : "YouTube player could not load.",
-        });
-    }
-  }
   async resume() {
-    const epoch = this.state.epoch;
-    if (this.activeKind === "audio" && this.audio) {
-      this.update({ status: "loading" });
-      await this.playAudio(this.audio, epoch);
-    }
-    if (this.activeKind === "youtube" && this.youtube) {
-      this.youtube.playVideo();
-      this.update({ status: "loading" });
-    }
+    if (!this.audio) return;
+    this.update({ status: "loading" });
+    await this.playAudio(this.audio, this.state.epoch);
   }
   async playOrResume(item: MediaItem) {
     const resumable =
       this.activeItemId === item.id &&
-      (this.state.status === "paused" || this.state.status === "needsGesture") &&
-      ((item.source === "local" && this.activeKind === "audio" && this.audio) ||
-        (item.source === "youtube" && this.activeKind === "youtube" && this.youtube));
+      this.audio &&
+      (this.state.status === "paused" || this.state.status === "needsGesture");
     if (resumable) return this.resume();
-    if (item.source === "local") return this.playLocal(item);
-    if (item.source === "youtube") return this.playYoutube(item);
+    return this.playTrack(item);
   }
   pause() {
-    if (this.activeKind === "audio") this.audio?.pause();
-    else this.youtube?.pauseVideo();
+    this.audio?.pause();
   }
   seek(seconds: number) {
     if (this.audio && Number.isFinite(this.audio.duration))
       this.audio.currentTime = seconds;
-    else this.youtube?.seekTo(seconds, true);
   }
   setVolume(value: number) {
-    this.audio && (this.audio.volume = value);
-    this.youtube?.setVolume(Math.round(value * 100));
+    if (this.audio) this.audio.volume = value;
     this.update({ volume: value });
   }
   toggleMute() {
     const muted = !this.state.muted;
     if (this.audio) this.audio.muted = muted;
-    if (muted) this.youtube?.mute();
-    else this.youtube?.unMute();
     this.update({ muted });
   }
   dispose() {

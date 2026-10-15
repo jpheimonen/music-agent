@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
-import { PlaybackController } from './playback.ts';
+import { PlaybackController, trackFailed } from './playback.ts';
 
 const local = id => ({
   id: `local:${id.repeat(64)}`,
@@ -62,11 +62,11 @@ afterEach(() => {
 
 test('starting a new local item stops and detaches the previous element', async () => {
   const player = new PlaybackController();
-  await player.playLocal(local('a'));
+  await player.playTrack(local('a'));
   const first = FakeAudio.instances[0];
   assert.equal(first.src, `/api/v1/media/local/${encodeURIComponent(local('a').id)}`);
   assert.equal(player.snapshot().status, 'playing');
-  await player.playLocal(local('b'));
+  await player.playTrack(local('b'));
   assert.equal(first.paused, true);
   assert.equal(first.src, '');
   assert.equal(player.snapshot().status, 'playing');
@@ -118,66 +118,47 @@ test('primary play restarts a retained local item after teardown and resumes a p
   reloaded.dispose();
 });
 
-test('YouTube state callbacks from a destroyed iframe are ignored', async () => {
-  let callback;
-  let destroyed = false;
-  globalThis.document = { createElement: () => ({}) };
-  window.YT = {
-    Player: class {
-      constructor(_element, options) {
-        callback = options.events.onStateChange;
-        options.events.onReady();
-      }
-      playVideo() {}
-      pauseVideo() {}
-      stopVideo() {}
-      destroy() { destroyed = true; }
-      setVolume() {}
-      mute() {}
-      unMute() {}
-      getCurrentTime() { return 0; }
-      getDuration() { return 0; }
-      seekTo() {}
-    },
-  };
-  const host = { replaceChildren() {}, append() {} };
-  globalThis.location = { origin: 'http://localhost' };
+test('YouTube items stream through the local server like collection files', async () => {
   const player = new PlaybackController();
-  player.setYoutubeHost(host);
-  await player.playYoutube({ id: 'youtube:abcdefghijk', source: 'youtube', title: 'Video', artist: null, availability: 'available' });
-  callback({ data: 1 });
+  await player.playTrack({ id: 'youtube:ab-cd_efghi', source: 'youtube', title: 'Video', artist: null, availability: 'available', durationSeconds: 259 });
+  const audio = FakeAudio.instances[0];
+  assert.equal(audio.src, '/api/v1/media/youtube/ab-cd_efghi');
   assert.equal(player.snapshot().status, 'playing');
-  player.stop();
-  callback({ data: 1 });
-  assert.equal(destroyed, true);
-  assert.equal(player.snapshot().status, 'stopped');
+  player.pause();
+  assert.equal(player.snapshot().status, 'paused');
+  await player.playOrResume({ id: 'youtube:ab-cd_efghi', source: 'youtube', title: 'Video', artist: null, availability: 'available' });
+  assert.equal(FakeAudio.instances.length, 1, 'resume keeps the same stream');
   player.dispose();
 });
 
-test('primary play remounts a retained YouTube item after source return', async () => {
-  let mounts = 0;
-  globalThis.document = { createElement: () => ({}) };
-  globalThis.location = { origin: 'http://localhost' };
-  window.YT = { Player: class {
-    constructor(_element, options) { mounts++; options.events.onReady(); }
-    playVideo() {}
-    pauseVideo() {}
-    stopVideo() {}
-    destroy() {}
-    setVolume() {}
-    mute() {}
-    unMute() {}
-    getCurrentTime() { return 0; }
-    getDuration() { return 10; }
-    seekTo() {}
-  } };
+test('a dropped connection mid-track reconnects at the same position, at most twice', async () => {
   const player = new PlaybackController();
-  player.setYoutubeHost({ replaceChildren() {}, append() {} });
-  const item = { id: 'youtube:abcdefghijk', source: 'youtube', title: 'Video', artist: null, availability: 'available' };
-  await player.playOrResume(item);
-  assert.equal(mounts, 1);
-  player.stop();
-  await player.playOrResume(item);
-  assert.equal(mounts, 2);
+  const item = local('a');
+  await player.playTrack(item);
+  const audio = FakeAudio.instances[0];
+  for (const position of [42, 80]) {
+    audio.currentTime = position;
+    audio.src = 'broken';
+    audio.emit('error');
+    assert.equal(audio.src, `/api/v1/media/local/${encodeURIComponent(item.id)}`, 'the same stream is reloaded');
+    assert.equal(player.snapshot().status, 'playing');
+    audio.currentTime = 0;
+    audio.emit('loadedmetadata');
+    assert.equal(audio.currentTime, position, 'playback continues where it stopped');
+  }
+  audio.currentTime = 120;
+  audio.emit('error');
+  assert.equal(player.snapshot().status, 'failed');
+  assert.equal(player.snapshot().error, trackFailed);
+  player.dispose();
+});
+
+test('a track that fails before playing anything is reported, not retried', async () => {
+  const player = new PlaybackController();
+  await player.playTrack(local('a'));
+  FakeAudio.instances[0].emit('error');
+  assert.equal(player.snapshot().status, 'failed');
+  assert.equal(player.snapshot().error, trackFailed);
+  assert.equal(FakeAudio.instances.length, 1);
   player.dispose();
 });
