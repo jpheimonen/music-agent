@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 
 export const stationStreams = {
   kexp: { playbackKind: 'direct-audio', url: 'https://kexp.streamguys1.com/kexp160.aac', provenance: { url: 'https://www.kexp.org/mobile/kexp-livestreams/', type: 'official' } },
+  'bbc-radio-4': { playbackKind: 'hls', url: 'https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d96000.norewind.m3u8', provenance: { url: 'https://www.bbc.co.uk/sounds/play/live:bbc_radio_fourfm', type: 'third_party' } },
   yle1: { playbackKind: 'hls', url: 'https://yleradiolive5.akamaized.net/hls/live/20000869/yleradio1/master.m3u8', provenance: { url: 'https://radio.ssishosting.net/RadioListe.asp?L=3', type: 'third_party' } },
   'radio-helsinki': { playbackKind: 'direct-audio', url: 'https://stream.radiohelsinki.fi/stream', provenance: { url: 'https://www.radiohelsinki.fi/yhteystiedot/', type: 'official' } },
   fip: { playbackKind: 'direct-audio', url: 'https://icecast.radiofrance.fr/fip-midfi.mp3?id=radiofrance', provenance: { url: 'https://community.roonlabs.com/t/new-fip-streaming-url/87335', type: 'third_party' } },
