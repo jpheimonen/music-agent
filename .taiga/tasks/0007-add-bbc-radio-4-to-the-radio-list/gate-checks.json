@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "The README says Live radio offers 21 stations and names each one. It needs 22 with BBC Radio 4, and Radio 4 belongs in the list of stations with no metadata adapter.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "No dependencies or build configuration changed, and the contracts build plus typecheck already passed on the final diff.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": true,
+    "reason": "Nobody has played Radio 4 in the app yet, and the request depends on the stream actually playing.",
+    "command": "taiga runner browser \"Start the web service (taiga runner web) if it is not running and open the app. Before pressing anything, mute the page by setting muted=true and volume=0 on every audio and video element, including any created later. Do not press Start the DJ or Play. Open Live radio, confirm a BBC Radio 4 tile appears, and click only that tile. Wait up to 20 seconds and report whether the Now playing state line says LIVE, which means the audio element fired its playing event. Also report any errors shown on the page or in the console, and what the now-playing area says. Take a screenshot, then go to about:blank so nothing keeps playing.\""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The full server and web adapter suites already passed on the final diff, and the change doesn't reach shared code.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "No auth, input handling, dependencies or new network code changed; the change only adds a fixed HTTPS URL in the existing station map.",
+    "command": ""
+  }
+]
