@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "Review README descriptions of stations, metadata states, source limitations and overrides against the final implementation.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": true,
+    "reason": "The change touches bundled frontend code and shared contracts; run the shipping build once in gates.",
+    "command": "taiga runner build"
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Current managed browser evidence covers all nine streams, real metadata, expiry, unavailable responses, retune races, Stop and final desktop/mobile CSS; no source changed during fast checks.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The fast check already ran the complete server suite (32 tests) and complete web adapter suite (10 tests), with workspace typecheck; no further configured suite needs running.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "New server-side network access and untrusted metadata parsing warrant static security checks on the changed files.",
+    "command": "taiga static-checks"
+  }
+]

@@ -771,9 +771,9 @@ h2,
 }
 .station strong {
   font-family: var(--display);
-  font-size: clamp(22px, 2.3vw, 30px);
+  font-size: clamp(22px, 2.3vw, 24px);
   font-weight: 900;
-  font-stretch: 125%;
+  font-stretch: 100%;
   text-transform: uppercase;
   line-height: 0.92;
   letter-spacing: -0.02em;
@@ -809,6 +809,37 @@ h2,
 }
 .station.on-air .station-live {
   color: var(--black);
+}
+
+.radio-metadata {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid currentColor;
+  overflow-wrap: anywhere;
+}
+.radio-metadata p {
+  margin: 0 0 8px;
+}
+.metadata-label {
+  font-family: var(--pixel);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.metadata-title {
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 800;
+  line-height: 1.15;
+}
+.metadata-artist {
+  font-size: 18px;
+}
+.metadata-note {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.radio-metadata a {
+  color: inherit;
+  text-underline-offset: 3px;
 }
 
 /* EQ bars, shown while something plays. */
@@ -1420,6 +1451,25 @@ dialog::backdrop {
   }
   .booth {
     padding: 26px 20px 28px;
+  }
+  .station-list {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .station {
+    min-height: 144px;
+    padding: 14px 12px 38px;
+  }
+  .station strong {
+    font-size: 18px;
+    font-stretch: 100%;
+  }
+  .station-note {
+    font-size: 13px;
+  }
+  .station-live {
+    left: 12px;
+    font-size: 10px;
   }
   .sticker {
     width: 86px;

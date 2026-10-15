@@ -5,6 +5,9 @@ import {
   trackPage,
   mediaItem,
   stationResolution,
+  stationCatalog,
+  stationId,
+  stationNowPlaying,
   jobAccepted,
   job,
   recommendationResult,
@@ -13,31 +16,27 @@ import {
   artistInfo,
   type MediaItem,
   type Capabilities,
+  type StationId,
 } from "@music/contracts";
 import { api, json, ApiFailure } from "./api";
 import { PlaybackController, type PlaybackState } from "./playback";
+import { watchStationMetadata, type RadioMetadata } from "./radio-metadata";
 import "@fontsource-variable/archivo/wdth.css";
 import "@fontsource-variable/archivo/wdth-italic.css";
 import "@fontsource/silkscreen/latin-400.css";
 import "./style.css";
 
-type Source = "local" | "youtube" | "kexp" | "yle1" | "radio-helsinki";
-type Station = Exclude<Source, "local" | "youtube">;
+type Source = "local" | "youtube" | StationId;
+type Station = StationId;
 type Entry = { media: MediaItem; origin: "You" | "DJ pick"; reason?: string };
 type Theme = "system" | "light" | "dark";
-const labels: Record<Source, string> = {
+const labels = {
   local: "Your collection",
   youtube: "YouTube",
-  kexp: "KEXP",
-  yle1: "Yle Radio 1",
-  "radio-helsinki": "Radio Helsinki",
-};
-const stationNotes: Record<Station, string> = {
-  kexp: "Seattle · independent and eclectic",
-  yle1: "Helsinki · classical, jazz and culture",
-  "radio-helsinki": "Helsinki · alternative and local",
-};
-const stations: Station[] = ["kexp", "yle1", "radio-helsinki"];
+  ...Object.fromEntries(Object.entries(stationCatalog).map(([id, station]) => [id, station.label])),
+} as Record<Source, string>;
+const stationNotes = Object.fromEntries(Object.entries(stationCatalog).map(([id, station]) => [id, station.note])) as Record<Station, string>;
+const stations = stationId.options;
 const sources: Source[] = ["youtube", "local", ...stations];
 const isRadio = (source: Source): source is Station =>
   source !== "local" && source !== "youtube";
@@ -165,6 +164,8 @@ function App() {
   const [stationError, setStationError] = useState("");
   const [stationPending, setStationPending] = useState(false);
   const stationRequest = useRef(0);
+  const [radioMetadata, setRadioMetadata] = useState<RadioMetadata | null>(null);
+  const radioActive = isRadio(source) && (stationPending || ["playing", "loading", "needsGesture"].includes(playback.status));
   const [tracks, setTracks] = useState<MediaItem[]>([]);
   const libraryRequest = useRef(0);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -198,6 +199,14 @@ function App() {
     applyTheme(theme);
     store("theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    setRadioMetadata(null);
+    if (!isRadio(source) || !radioActive) return;
+    return watchStationMetadata(source, setRadioMetadata, (id, signal) =>
+      api(`/stations/${id}/now-playing`, stationNowPlaying, { signal }),
+    );
+  }, [source, radioActive]);
 
   const updateQueue = useCallback(
     (value: Entry[] | ((entries: Entry[]) => Entry[])) => {
@@ -760,6 +769,7 @@ function App() {
     tasteData?.summaryStatus === "pending" && cap?.codex.state !== "ready";
   const playing = playback.status === "playing";
   const radioLive = stationPending || playing || playback.status === "loading";
+  const metadata = radioActive && radioMetadata?.stationId === source ? radioMetadata : null;
   const currentArtist =
     current?.artist?.displayName || current?.attribution || "Artist unknown";
   // The ticker repeats what the page already says, so screen readers skip it.
@@ -912,7 +922,7 @@ function App() {
                         onClick={() => tuneIn(id)}
                       >
                         <span className="station-preset" aria-hidden="true">
-                          Preset 0{index + 1}
+                          Preset {String(index + 1).padStart(2, "0")}
                         </span>
                         <strong>{labels[id]}</strong>
                         <span className="station-note">{stationNotes[id]}</span>
@@ -1109,6 +1119,27 @@ function App() {
                     <h2 className="track-title">{labels[source]}</h2>
                     <p className="artist-name">{stationNotes[source]}</p>
                   </div>
+                </div>
+                <div className="radio-metadata" aria-live="polite" aria-atomic="true">
+                  {metadata?.status === "current" ? (
+                    <>
+                      <p className="metadata-label">{metadata.kind === "programme" ? "On air · programme" : "Latest reported track"}</p>
+                      <p className="metadata-title">{metadata.title}</p>
+                      {metadata.artist && <p className="metadata-artist">{metadata.artist}</p>}
+                      <p className="metadata-note">
+                        <a href={metadata.sourceUrl || stationCatalog[source].website} target="_blank" rel="noreferrer">{labels[source]} playlist</a>
+                        {" · "}Station information may differ slightly from the audio.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="metadata-note">
+                      {!radioActive ? "Track information appears while you listen."
+                        : !metadata || metadata.status === "loading" ? "Checking what’s on air…"
+                        : metadata.status === "unsupported" ? "Live track information isn’t provided for this stream."
+                        : metadata.status === "stale" ? "The station’s last update has expired. Checking again shortly."
+                        : "Live track information is unavailable right now."}
+                    </p>
+                  )}
                 </div>
                 <div className="transport">
                   <button
@@ -1462,9 +1493,10 @@ function App() {
                 : current?.artist?.displayName || "Artist notes"}
             </h2>
             {isRadio(source) ? (
-              <p>
-                The station's hosts tell the story here. Enjoy the broadcast.
-              </p>
+              <>
+                <p>{stationNotes[source]}</p>
+                <p><a href={stationCatalog[source].website} target="_blank" rel="noreferrer">Visit {labels[source]}</a></p>
+              </>
             ) : !current ? (
               <p>Notes about the artist appear here while their music plays.</p>
             ) : !current.artist || current.artist.confidence === "low" ? (

@@ -1,0 +1,9 @@
+# Infographic production
+
+Used the built-in image_gen tool through the imagegen skill. The final file is `radio-overview.png`; desktop.png and mobile.png are unchanged copies of managed browser captures. All three saved images were opened with view_image and judged readable.
+
+The generation prompt requested a cream-paper, black-ink and vermilion editorial radio receiver diagram, with nine labelled tuning marks: KEXP, Yle Radio 1, Radio Helsinki, FIP, WFMU, NTS 1, NTS 2, Radio Paradise and Worldwide FM. It specified the title “More stations. A clearer signal.”, the caption “Three favourites become nine curated presets”, separate live audio and station-report cables, a continuous waveform, and the statements “Keeps playing when metadata is missing”, “Tracks where available”, “NTS reports programmes”, “Expired titles clear”, and “Source attribution • Refresh while listening • Clear on stop or retune”. It prohibited invented song titles, logos, maps, tests, checks, code, counts and commit information, and identified the visual as conceptual rather than product UI.
+
+Final edit prompt, verbatim:
+
+> Edit this infographic, preserving the main title, subtitle, radio, all nine station labels, the waveform, station report slip and bottom footer exactly. Remove all decorative slogan text from the margins and the receiver face. Specifically erase 'CURATED RADIO FOR A MORE OPEN EAR', 'LIVE RADIO FOR A BRIGHTER LISTENING WORLD', 'CURIOSITY TRAVELS FURTHER', 'A WIDER WORLD ON AIR', 'LISTEN EXPLORE BELONG', 'PEOPLE PLACES IDEAS ALWAYS ON', 'GOOD RADIO BUILDS A KINDER DAY', and 'SAME STATIONS A BRIGHTER TOMORROW'. Replace these removed texts with matching blank paper or receiver surface. Keep the explanatory labels LIVE AUDIO and STATION REPORT. Add no new text. The purpose is to explain actual software behavior without filler slogans.
