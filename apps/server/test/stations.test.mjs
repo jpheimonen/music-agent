@@ -11,7 +11,7 @@ const kexp = (offset = -30_000) => ({ results: [{ play_type: 'trackplay', song: 
 
 test('all curated stations have consistent IDs, descriptions and HTTPS resolutions', () => {
   const descriptors = stationDescriptors();
-  assert.equal(descriptors.length, 21);
+  assert.equal(descriptors.length, 22);
   assert.deepEqual(descriptors.map(station => station.stationId), stationId.options);
   for (const station of descriptors) {
     stationDescriptor.parse(station);

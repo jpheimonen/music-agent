@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const mediaId = z.union([z.string().regex(/^local:[a-f0-9]{64}$/), z.string().regex(/^youtube:[A-Za-z0-9_-]{11}$/)]);
 export const stationCatalog = {
   kexp: { label: 'KEXP', note: 'Seattle · independent and eclectic', website: 'https://www.kexp.org/' },
+  'bbc-radio-4': { label: 'BBC Radio 4', note: 'London · news, drama, documentaries and conversation', website: 'https://www.bbc.co.uk/sounds/play/live:bbc_radio_fourfm' },
   yle1: { label: 'Yle Radio 1', note: 'Helsinki · classical, jazz and culture', website: 'https://yle.fi/aihe/yle-radio-1' },
   'radio-helsinki': { label: 'Radio Helsinki', note: 'Helsinki · alternative and local', website: 'https://www.radiohelsinki.fi/' },
   fip: { label: 'FIP', note: 'Paris · jazz, soul and discoveries from everywhere', website: 'https://www.radiofrance.fr/fip' },
