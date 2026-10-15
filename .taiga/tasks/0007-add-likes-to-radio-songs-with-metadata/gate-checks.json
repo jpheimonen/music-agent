@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": true,
+    "reason": "Likes and taste-file formats may be described in the README or project knowledge, and they now include radio songs.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The full build already passed in the fast checks on the final commit.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "The earlier browser run already covered the Like button on a KEXP song: liking it, reloading and unliking. The code is unchanged since then, and I'll re-check the 500 case during review.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The fast checks already ran the whole server suite (45 tests) and the web adapter tests.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "Untrusted metadata now reaches the server's input validation and is written to CSV files on disk.",
+    "command": ""
+  }
+]

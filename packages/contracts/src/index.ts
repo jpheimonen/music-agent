@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 export const mediaId = z.union([z.string().regex(/^local:[a-f0-9]{64}$/), z.string().regex(/^youtube:[A-Za-z0-9_-]{11}$/)]);
+// A song heard on the radio. The server derives the hash from its artist and title, so the same song gets one ID on every station.
+export const radioSongId = z.string().regex(/^radio:[a-f0-9]{64}$/);
+// Anything the listener can like or dislike.
+export const feedbackId = z.union([mediaId, radioSongId]);
 export const stationCatalog = {
   kexp: { label: 'KEXP', note: 'Seattle · independent and eclectic', website: 'https://www.kexp.org/' },
   'bbc-radio-4': { label: 'BBC Radio 4', note: 'London · news, drama, documentaries and conversation', website: 'https://www.bbc.co.uk/sounds/play/live:bbc_radio_fourfm' },
@@ -39,7 +43,7 @@ export const stationDescriptor = z.object({ stationId, label: z.string(), playba
 export const stationResolution = z.object({ stationId, playbackKind: stationDescriptor.shape.playbackKind, url: z.string().url(), expiresAt: z.null(), sourceRevision: z.string() });
 const stationMetadataBase = z.object({ stationId, checkedAt: z.string().datetime(), sourceUrl: z.string().url().nullable() });
 export const stationNowPlaying = z.discriminatedUnion('status', [
-  stationMetadataBase.extend({ status: z.literal('current'), kind: z.enum(['track', 'programme']), title: z.string().trim().min(1).max(300), artist: z.string().trim().min(1).max(300).nullable(), startedAt: z.string().datetime().nullable(), expiresAt: z.string().datetime() }),
+  stationMetadataBase.extend({ status: z.literal('current'), kind: z.enum(['track', 'programme']), title: z.string().trim().min(1).max(300), artist: z.string().trim().min(1).max(300).nullable(), startedAt: z.string().datetime().nullable(), expiresAt: z.string().datetime(), songId: radioSongId.optional() }),
   stationMetadataBase.extend({ status: z.enum(['unavailable', 'unsupported', 'stale']) }),
 ]);
 export const trackPage = z.object({ items: z.array(mediaItem), nextCursor: z.string().nullable(), scanRevision: z.number().int().nonnegative() });
@@ -48,8 +52,10 @@ export const youtubeResolveRequest = z.object({ input: z.string().min(1).max(204
 export const youtubeSearchQuery = z.object({ q: z.string().trim().min(1).max(200) });
 export const youtubeSearchResult = z.object({ items: z.array(mediaItem), nextPageToken: z.string().nullable(), emptyReason: z.literal('no_verified_candidates').optional() });
 export const reaction = z.enum(['like', 'dislike', 'neutral']);
-export const feedbackRequest = z.object({ reaction, expectedRevision: z.number().int().nonnegative(), media: mediaItem.optional() });
-export const feedbackResponse = z.object({ mediaId, reaction, feedbackRevision: z.number().int().nonnegative() });
+export const radioSong = z.object({ title: z.string().trim().min(1).max(300), artist: z.string().trim().min(1).max(300).nullable() });
+// media describes a local or YouTube track; radioSong describes a song heard on a station.
+export const feedbackRequest = z.object({ reaction, expectedRevision: z.number().int().nonnegative(), media: mediaItem.optional(), radioSong: radioSong.optional() });
+export const feedbackResponse = z.object({ mediaId: feedbackId, reaction, feedbackRevision: z.number().int().nonnegative() });
 export const taste = z.object({ feedbackRevision: z.number().int().nonnegative(), summaryRevision: z.number().int().nonnegative(), summaryStatus: z.enum(['unavailable', 'current', 'pending', 'failed']), summaryMarkdown: z.string().nullable(), feedback: z.record(z.string(), reaction) });
 // Songs heard or queued recently, by name, so the DJ doesn't repeat a song that YouTube offers under another video ID.
 export const trackName = z.object({ title: z.string().max(300), artist: z.string().max(200).nullable() });
@@ -80,4 +86,5 @@ export type DjNote = z.infer<typeof djNote>;
 export type DjMessage = z.infer<typeof djMessage>;
 export type DjMemory = z.infer<typeof djMemory>;
 export type DjMessageRequest = z.infer<typeof djMessageRequest>;
+export type RadioSong = z.infer<typeof radioSong>;
 export type ListeningEvent = z.infer<typeof listeningEvent>;

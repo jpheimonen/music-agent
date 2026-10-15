@@ -7,6 +7,7 @@ type Props = {
   now: Now;
   playback: PlaybackState;
   reaction: Reaction;
+  canLike: boolean;
   radioLive: boolean;
   stationPending: boolean;
   stationError: string;
@@ -90,15 +91,15 @@ export function PlayerBar(props: Props) {
                 Skip
               </button>
             )}
+            {props.canLike && (
+              <button className={`reaction ${props.reaction === "like" ? "active" : ""}`} aria-pressed={props.reaction === "like"} onClick={props.onLike}>
+                {props.reaction === "like" ? "♥" : "♡"} Like
+              </button>
+            )}
             {track && (
-              <>
-                <button className={`reaction ${props.reaction === "like" ? "active" : ""}`} aria-pressed={props.reaction === "like"} onClick={props.onLike}>
-                  {props.reaction === "like" ? "♥" : "♡"} Like
-                </button>
-                <button className="reaction dislike" title="Skip this track and tell the DJ you dislike it" onClick={props.onNotForMe}>
-                  ✕ Not for me
-                </button>
-              </>
+              <button className="reaction dislike" title="Skip this track and tell the DJ you dislike it" onClick={props.onNotForMe}>
+                ✕ Not for me
+              </button>
             )}
           </div>
           {duration !== null && (
