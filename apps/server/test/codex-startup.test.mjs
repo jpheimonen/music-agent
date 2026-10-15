@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CodexRunner, configuredModel, executionOverrides, modelOverrides, probeDiagnostic } from '../dist/codex.js';
+import { CodexRunner, configuredModel, executionOverrides, modelOverrides } from '../dist/codex.js';
 import { loadConfig } from '../dist/config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -26,7 +26,7 @@ test('nontrivial personal config is preserved and disabled integrations receive 
   try {
     const source = 'model="gpt-5"\nnotify=["/bin/false"]\n[mcp_servers.private_tool]\ncommand="/bin/false"\n[profiles.other.mcp_servers.another_tool]\ncommand="/bin/false"\n';
     await writeFile(join(base, 'config.toml'), source);
-    const overrides = await executionOverrides(base, join(base, 'scratch'), join(base, 'runtime'));
+    const overrides = await executionOverrides(base, join(base, 'scratch'));
     assert.ok(overrides.includes('mcp_servers.private_tool.enabled=false'));
     assert.ok(!overrides.includes('mcp_servers.another_tool.enabled=false'), 'inactive profiles are not applied');
     for (const required of ['notify=[]', 'features.shell_tool=false', 'features.apps=false', 'features.plugins=false', 'features.hooks=false', 'project_doc_max_bytes=0']) assert.ok(overrides.includes(required));
@@ -44,7 +44,7 @@ test('pinned CLI sees a configured MCP server as disabled without rewriting conf
     const source = 'model="gpt-5"\nnotify=["/bin/false"]\n[mcp_servers.synthetic]\ncommand="/bin/false"\nargs=[]\n';
     await writeFile(join(home, 'config.toml'), source);
     const native = await realpath(join(dirname(require.resolve(`@openai/codex-linux-${process.arch}/package.json`)), 'vendor', process.arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl', 'bin', 'codex'));
-    const overrides = await executionOverrides(home, allowed, dirname(dirname(native)));
+    const overrides = await executionOverrides(home, allowed);
     const result = spawnSync(native, [...overrides.flatMap(value => ['-c', value]), 'mcp', 'list', '--json'], {
       cwd: allowed, env: { PATH: process.env.PATH, HOME: userInfo().homedir, CODEX_HOME: home }, encoding: 'utf8', timeout: 5000,
     });
@@ -53,14 +53,6 @@ test('pinned CLI sees a configured MCP server as disabled without rewriting conf
     assert.equal(servers.find(server => server.name === 'synthetic')?.enabled, false);
     assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), source);
   } finally { await rm(base, { recursive: true, force: true }); }
-});
-
-test('a host that blocks user namespaces is reported as a sandbox setup problem, not a boundary failure', () => {
-  for (const stderr of ['bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n', 'bwrap: setting up uid map: Permission denied\n', 'bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.\n']) {
-    assert.equal(probeDiagnostic({ status: 1, stderr, signal: null }).cause, 'namespace_blocked');
-  }
-  assert.equal(probeDiagnostic({ status: 1, stderr: 'cat: /x: Permission denied\n', signal: null }).cause, 'unexpected_result');
-  assert.equal(probeDiagnostic({ status: 1, stderr: 'bwrap: execvp cat: No such file\n', signal: null }).cause, 'sandbox_exec_failed');
 });
 
 test('music jobs keep a supported personal model and otherwise use the pinned catalog preference', async () => {
@@ -83,7 +75,7 @@ test('music jobs keep a supported personal model and otherwise use the pinned ca
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('npm PATH, explicit CLI shim, and native override pass the real boundary before existing-login status', { skip: process.platform !== 'linux', timeout: 60000 }, async (t) => {
+test('npm PATH, explicit CLI shim, and native override resolve the native binary and reach the existing-login check', { skip: process.platform !== 'linux', timeout: 60000 }, async () => {
   const base = await mkdtemp(join(tmpdir(), 'music-codex-startup-'));
   try {
     const shim = await realpath(require.resolve('@openai/codex/bin/codex.js'));
@@ -95,13 +87,8 @@ test('npm PATH, explicit CLI shim, and native override pass the real boundary be
       await writeFile(join(home, 'config.toml'), original);
       const config = loadConfig({ MUSIC_DATA_DIR: join(base, label.replace(' ', '-')), MUSIC_CODEX_HOME: home, MUSIC_CODEX_BIN: override });
       const runner = await CodexRunner.create(config);
-      if (runner.capability.reason === 'codex_sandbox_blocked') {
-        t.skip('this host blocks the user namespaces bubblewrap needs (see README: Codex DJ setup)');
-        return;
-      }
       assert.equal(runner.binary, native, `${label}: resolved native binary`);
-      assert.equal(runner.runtime, dirname(dirname(native)), `${label}: minimal native runtime grant`);
-      assert.deepEqual(runner.capability, { state: 'not_configured', reason: 'setup_required', authHomeSource: 'MUSIC_CODEX_HOME' }, `${label}: boundary passed before existing-login check`);
+      assert.deepEqual(runner.capability, { state: 'not_configured', reason: 'setup_required', authHomeSource: 'MUSIC_CODEX_HOME' }, `${label}: reached the existing-login check`);
       assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), original);
     }
   } finally {

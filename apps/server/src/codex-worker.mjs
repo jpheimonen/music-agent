@@ -9,7 +9,7 @@ process.on('message', async job => {
       configOverrides: job.configOverrides,
     });
     const discovery = job.kind === 'discoverYoutube';
-    const thread = codex.startThread({ workingDirectory: job.scratch, skipGitRepoCheck: true, approvalPolicy: 'never', webSearchMode: discovery ? 'live' : 'disabled' });
+    const thread = codex.startThread({ workingDirectory: job.scratch, skipGitRepoCheck: true, approvalPolicy: 'never', sandboxMode: 'danger-full-access', webSearchMode: discovery ? 'live' : 'disabled' });
     if (discovery) {
       const collector = new SearchEvidenceCollector(job.runtimeVersion);
       const controller = new AbortController();

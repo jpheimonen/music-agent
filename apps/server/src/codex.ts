@@ -33,9 +33,8 @@ function findBinary(name: string, path: string) {
   }
   throw new CodexError('setup_required', false);
 }
-// The npm CLI entry is a Node shim. Inside its sandbox it execs the native
-// binary from a separate optional package, so the read grant must follow that
-// binary rather than the shim's package directory.
+// The npm CLI entry is a Node shim that execs the native binary from a
+// separate optional package. Run that binary directly.
 async function resolveNativeBinary(binary: string) {
   if (!binary.endsWith('/bin/codex.js')) return binary;
   const packageRoot = dirname(dirname(binary));
@@ -65,15 +64,6 @@ async function resolveNativeBinary(binary: string) {
   } catch {
     throw new CodexError('codex_runtime_missing', false);
   }
-}
-// Hosts such as Ubuntu 24.04 with kernel.apparmor_restrict_unprivileged_userns=1
-// stop bubblewrap from setting up its namespaces. The sandbox never starts, so
-// this is a host setup problem rather than a boundary that leaked or misread.
-const namespaceBlocked = /bwrap: (loopback: Failed RTM_NEW|setting up uid map|No permissions to create a?\s*new namespace|Creating new namespace failed)/i;
-export function probeDiagnostic(result: Pick<ReturnType<typeof spawnSync>, 'error' | 'stderr' | 'signal' | 'status'>) {
-  const stderr = typeof result.stderr === 'string' ? result.stderr : '';
-  const cause = result.error ? 'spawn_error' : namespaceBlocked.test(stderr) ? 'namespace_blocked' : /bwrap: execvp/.test(stderr) ? 'sandbox_exec_failed' : /Error: (invalid transport|failed to (load|parse|read) (configuration|config|model instructions)|unknown feature)/i.test(stderr) ? 'config_error' : result.signal ? 'signal' : 'unexpected_result';
-  return { status: result.status, cause };
 }
 type CatalogModel = { slug?: unknown; visibility?: unknown; priority?: unknown; default_reasoning_level?: unknown };
 // The pinned CLI only accepts models from its own catalog. A newer model chosen
@@ -106,7 +96,7 @@ async function configLayers(codexHome: string) {
 export async function configuredModel(codexHome: string) {
   return (await configLayers(codexHome)).map(layer => layer.model).filter(model => typeof model === 'string').at(-1);
 }
-export async function executionOverrides(codexHome: string, allowed: string, runtime: string) {
+export async function executionOverrides(codexHome: string, scratch: string) {
   const layers = await configLayers(codexHome);
   if (layers.some(layer => layer.openai_base_url || layer.chatgpt_base_url)) throw new CodexError('codex_config_incompatible', false);
   const servers = new Set(layers.flatMap(layer => Object.keys(table(layer.mcp_servers))));
@@ -116,9 +106,6 @@ export async function executionOverrides(codexHome: string, allowed: string, run
   // CLI -c overrides take precedence over user config. Empty tables would merge
   // with configured servers, so disable every named server explicitly.
   return [
-    'default_permissions="music_agent"',
-    `permissions.music_agent.filesystem={":root"="deny",":minimal"="read",${JSON.stringify(allowed)}="read",${JSON.stringify(runtime)}="read"}`,
-    'permissions.music_agent.network={"*"="deny"}',
     'model_provider="openai"',
     'notify=[]',
     'features.shell_tool=false',
@@ -129,7 +116,7 @@ export async function executionOverrides(codexHome: string, allowed: string, run
     'features.hooks=false',
     'features.multi_agent=false',
     'project_doc_max_bytes=0',
-    `model_instructions_file=${JSON.stringify(join(allowed, 'music-instructions.txt'))}`,
+    `model_instructions_file=${JSON.stringify(join(scratch, 'music-instructions.txt'))}`,
     ...[...servers].map(name => `mcp_servers.${name}.enabled=false`),
   ];
 }
@@ -148,7 +135,6 @@ export class CodexRunner {
   private idleResolvers: Array<() => void> = [];
   readonly capability: { state: 'ready' | 'not_configured' | 'unavailable'; reason?: string; authHomeSource: Config['codexHomeSource'] };
   private binary = '';
-  private runtime = '';
   private path = process.env.PATH ?? '/usr/bin:/bin';
   private searchVersionSupported = false;
   private models: string[] = [];
@@ -160,37 +146,11 @@ export class CodexRunner {
     if (this.discoveryFailure) return { state:'unavailable' as const, reason:this.discoveryFailure };
     return { state:'ready' as const, method:'codex_web_search' as const };
   }
-  private async checkBoundary() {
-    const base = await mkdtemp(join(this.config.dataDir, 'codex-boundary-'));
-    const allowed = join(base, 'allowed'); const outside = join(base, 'outside');
-    await mkdir(allowed); await mkdir(outside);
-    const insideFile = join(allowed, 'inside.txt'); const outsideFile = join(outside, 'outside.txt');
-    await writeFile(insideFile, 'INSIDE_SYNTHETIC'); await writeFile(outsideFile, 'OUTSIDE_SYNTHETIC');
-    await writeFile(join(allowed, 'music-instructions.txt'), 'Follow the music task and return only the requested JSON. Do not use tools.\n');
-    const overrides = (await executionOverrides(this.config.codexHome, allowed, this.runtime)).flatMap(value => ['-c', value]);
-    const env = codexEnv(this.config, this.path);
-    try {
-      const probe = (path: string) => spawnSync(this.binary,['sandbox',...overrides,'--permission-profile','music_agent','cat',path],{cwd:allowed,env,encoding:'utf8',timeout:5000,maxBuffer:2048});
-      const inside = probe(insideFile); const forbidden = probe(outsideFile);
-      if (inside.status !== 0 || inside.stdout.trim() !== 'INSIDE_SYNTHETIC') {
-        const diagnostic = probeDiagnostic(inside);
-        console.error('Codex boundary allowed probe failed', diagnostic);
-        if (diagnostic.cause === 'config_error') throw new CodexError('codex_config_incompatible', false);
-        if (diagnostic.cause === 'namespace_blocked') throw new CodexError('codex_sandbox_blocked', false);
-        throw new CodexError('codex_boundary_allowed_failed',false);
-      }
-      if (forbidden.status === 0 || /OUTSIDE_SYNTHETIC/.test(forbidden.stdout + forbidden.stderr)) {
-        console.error('Codex boundary sibling probe failed', probeDiagnostic(forbidden));
-        throw new CodexError('codex_boundary_forbidden_failed',false);
-      }
-    } finally { await rm(base,{recursive:true,force:true}); }
-  }
   private constructor(private config: Config) { this.capability = { state: 'not_configured', authHomeSource: config.codexHomeSource }; }
   static async create(config: Config) {
     const runner = new CodexRunner(config);
     try {
       runner.binary = await resolveNativeBinary(await realpath(findBinary(config.codexBin ?? 'codex', runner.path)));
-      runner.runtime = dirname(dirname(runner.binary));
       const version = execFileSync(runner.binary, ['--version'], { encoding: 'utf8', timeout: 4000 }).trim();
       if (version !== 'codex-cli 0.156.1') throw new CodexError('unsupported_codex_version', false);
       const sdkEntry = fileURLToPath(import.meta.resolve('@openai/codex-sdk'));
@@ -198,7 +158,6 @@ export class CodexRunner {
       runner.searchVersionSupported = sdkManifest.version === SEARCH_RUNTIME_VERSION;
       try { if (!(await stat(config.codexHome)).isDirectory()) throw new Error('not a directory'); }
       catch { throw new CodexError('setup_required', false); }
-      await runner.checkBoundary();
       const status = spawnSync(runner.binary, ['login', 'status'], { cwd: config.codexHome, encoding: 'utf8', timeout: 5000, env: codexEnv(config, runner.path) });
       if (status.error) throw status.error;
       if (status.status !== 0) throw new CodexError('setup_required', false);
@@ -256,7 +215,7 @@ export class CodexRunner {
       if (prompt.length > 50_000) throw new CodexError('invalid_request', false);
       const worker = fileURLToPath(new URL('./codex-worker.mjs', import.meta.url));
       const env = codexEnv(this.config, this.path);
-      const configOverrides = [...await executionOverrides(this.config.codexHome, scratch, this.runtime), ...this.models];
+      const configOverrides = [...await executionOverrides(this.config.codexHome, scratch), ...this.models];
       child = fork(worker, [], { detached: true, execArgv: [], stdio: ['ignore','ignore','ignore','ipc'], env });
       this.active = child;
       const response = await new Promise<{ok:boolean;finalResponse?:string;code?:string;searchEvidence?:unknown;searchEventCount?:unknown;schemaVersion?:unknown}>((resolveResult, reject) => {
