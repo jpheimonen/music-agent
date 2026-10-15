@@ -2,6 +2,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { userInfo } from 'node:os';
 import { z } from 'zod';
+import type { StationId } from '@music/contracts';
 
 const envSchema = z.object({
   MUSIC_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
@@ -26,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     const value = parsed[key];
     if (value && (new URL(value).protocol !== 'https:' || new URL(value).username || new URL(value).password)) throw new Error(`${key} must be credential-free HTTPS`);
   }
-  return { port: parsed.MUSIC_PORT, libraryRoot: parsed.MUSIC_LIBRARY_ROOT, dataDir, userHome, codexHome: resolve(repositoryRoot, selectedCodexHome), codexHomeSource, codexBin: parsed.MUSIC_CODEX_BIN, stationOverrides: { kexp: parsed.MUSIC_STATION_KEXP_URL, yle1: parsed.MUSIC_STATION_YLE1_URL, 'radio-helsinki': parsed.MUSIC_STATION_RADIO_HELSINKI_URL } };
+  const stationOverrides: Partial<Record<StationId, string>> = { kexp: parsed.MUSIC_STATION_KEXP_URL, yle1: parsed.MUSIC_STATION_YLE1_URL, 'radio-helsinki': parsed.MUSIC_STATION_RADIO_HELSINKI_URL };
+  return { port: parsed.MUSIC_PORT, libraryRoot: parsed.MUSIC_LIBRARY_ROOT, dataDir, userHome, codexHome: resolve(repositoryRoot, selectedCodexHome), codexHomeSource, codexBin: parsed.MUSIC_CODEX_BIN, stationOverrides };
 }
 export type Config = ReturnType<typeof loadConfig>;

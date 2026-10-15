@@ -1,17 +1,23 @@
 import type { Config } from './config.js';
-import type { StationDescriptor, StationResolution } from '@music/contracts';
+import { stationCatalog, type StationDescriptor, type StationResolution } from '@music/contracts';
 import { createHash } from 'node:crypto';
 
 const stations = {
-  kexp: { label: 'KEXP', playbackKind: 'direct-audio', url: 'https://kexp.streamguys1.com/kexp160.aac', provenance: { url: 'https://www.kexp.org/mobile/kexp-livestreams/', type: 'official' } },
-  yle1: { label: 'Yle Radio 1', playbackKind: 'hls', url: 'https://yleradiolive5.akamaized.net/hls/live/20000869/yleradio1/master.m3u8', provenance: { url: 'https://radio.ssishosting.net/RadioListe.asp?L=3', type: 'third_party' } },
-  'radio-helsinki': { label: 'Radio Helsinki', playbackKind: 'direct-audio', url: 'https://stream.radiohelsinki.fi/stream', provenance: { url: 'https://www.radiohelsinki.fi/yhteystiedot/', type: 'official' } },
+  kexp: { playbackKind: 'direct-audio', url: 'https://kexp.streamguys1.com/kexp160.aac', provenance: { url: 'https://www.kexp.org/mobile/kexp-livestreams/', type: 'official' } },
+  yle1: { playbackKind: 'hls', url: 'https://yleradiolive5.akamaized.net/hls/live/20000869/yleradio1/master.m3u8', provenance: { url: 'https://radio.ssishosting.net/RadioListe.asp?L=3', type: 'third_party' } },
+  'radio-helsinki': { playbackKind: 'direct-audio', url: 'https://stream.radiohelsinki.fi/stream', provenance: { url: 'https://www.radiohelsinki.fi/yhteystiedot/', type: 'official' } },
+  fip: { playbackKind: 'direct-audio', url: 'https://icecast.radiofrance.fr/fip-midfi.mp3?id=radiofrance', provenance: { url: 'https://community.roonlabs.com/t/new-fip-streaming-url/87335', type: 'third_party' } },
+  wfmu: { playbackKind: 'direct-audio', url: 'https://stream0.wfmu.org/freeform-128k.mp3', provenance: { url: 'https://wfmu.org/audiostream.shtml', type: 'official' } },
+  'nts-1': { playbackKind: 'direct-audio', url: 'https://stream-relay-geo.ntslive.net/stream?client=direct', provenance: { url: 'https://github.com/tiktuk/nts-radio-cli', type: 'third_party' } },
+  'nts-2': { playbackKind: 'direct-audio', url: 'https://stream-relay-geo.ntslive.net/stream2?client=direct', provenance: { url: 'https://github.com/tiktuk/nts-radio-cli', type: 'third_party' } },
+  'radio-paradise': { playbackKind: 'direct-audio', url: 'https://stream.radioparadise.com/aac-320', provenance: { url: 'https://radioparadise.com/listen/stream-links', type: 'official' } },
+  'worldwide-fm': { playbackKind: 'direct-audio', url: 'https://worldwide-fm.radiocult.fm/stream', provenance: { url: 'https://www.worldwidefm.net/about', type: 'official' } },
 } as const;
 export type StationKey = keyof typeof stations;
 export function stationDescriptors(): StationDescriptor[] {
   return (Object.keys(stations) as StationKey[]).map(stationId => {
     const station = stations[stationId];
-    return { stationId, label: station.label, playbackKind: station.playbackKind, availability: 'ready', provenance: station.provenance, lastVerifiedAt: null };
+    return { stationId, label: stationCatalog[stationId].label, playbackKind: station.playbackKind, availability: 'ready', provenance: station.provenance, lastVerifiedAt: null };
   });
 }
 export function resolveStation(config: Config, stationId: StationKey): StationResolution {

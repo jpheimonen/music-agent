@@ -8,6 +8,7 @@ import { JobRegistry } from './jobs.js';
 import { capabilities, stationId, mediaId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, type Capabilities } from '@music/contracts';
 import { LibraryService, LibraryError, parseRange } from './library.js';
 import { stationDescriptors, resolveStation } from './stations.js';
+import { StationNowPlayingService } from './station-now-playing.js';
 import { YoutubeService, YoutubeProviderError, parseVideoId, youtubeItem } from './youtube.js';
 import { TasteRepository, TasteError } from './taste.js';
 import { CodexRunner } from './codex.js';
@@ -19,6 +20,7 @@ const jobs = new JobRegistry();
 const library = new LibraryService(config.libraryRoot, config.dataDir);
 await library.initialize();
 const youtube = new YoutubeService();
+const stationMetadata = new StationNowPlayingService(fetch, Date.now, config.stationOverrides);
 const tasteRepository = await TasteRepository.open(config.dataDir);
 const codex = await CodexRunner.create(config);
 const dj = new DjService(codex, library, youtube, tasteRepository, config.dataDir);
@@ -45,7 +47,7 @@ const capabilitySnapshot = (): Capabilities => capabilities.parse({
   codex: { ...codex.capability, synthesisStatus: codex.capability.state === 'ready' ? tasteRepository.snapshot().summaryStatus : 'unavailable' },
   youtubeDiscovery: codex.discoveryCapability.state === 'ready' && youtube.failure ? {state:'unavailable',reason:youtube.failure} : codex.discoveryCapability,
   youtubeEmbed: { state: 'ready' },
-  stations: { kexp: { state: 'ready' }, yle1: { state: 'ready' }, 'radio-helsinki': { state: 'ready' } },
+  stations: Object.fromEntries(stationDescriptors().map(station => [station.stationId, { state: station.availability }])),
 });
 function fail(code: string, message: string, status: number, requestId: string, retryable = false) { return { status, body: { error: { code, message, retryable, requestId } } }; }
 app.addHook('onRequest', async (request, reply) => {
@@ -160,6 +162,7 @@ app.post('/api/v1/artists/:key/info/refresh', async (request, reply) => {
 app.get('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.get(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.delete('/api/v1/jobs/:id', async (request, reply) => { const { id } = z.object({ id: z.string().uuid() }).parse(request.params); const job = jobs.cancel(id); if (!job) return reply.code(404).send(fail('not_found', 'Job not found.', 404, request.id).body); return job; });
 app.get('/api/v1/stations', async () => stationDescriptors());
+app.get('/api/v1/stations/:id/now-playing', async request => stationMetadata.get(stationId.parse((request.params as {id:string}).id)));
 app.post('/api/v1/stations/:id/resolve', async request => resolveStation(config, stationId.parse((request.params as {id:string}).id)));
 app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/')) return reply.code(404).send(fail('not_found', 'API route not found.', 404, request.id).body); return reply.code(404).send('Not found'); });
 const webDist = resolve(import.meta.dirname, '../../web/dist');
