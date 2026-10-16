@@ -216,6 +216,7 @@ app.get('/api/v1/stations/:id/now-playing', async request => {
 app.post('/api/v1/stations/:id/resolve', async request => resolveStation(config, stationId.parse((request.params as {id:string}).id)));
 app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/')) return reply.code(404).send(fail('not_found', 'API route not found.', 404, request.id).body); return reply.code(404).send('Not found'); });
 const webDist = resolve(import.meta.dirname, '../../web/dist');
-if (existsSync(webDist)) await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: false });
+// Look files up on each request, so files added by a rebuild (such as new icons or asset hashes) are served without a restart.
+if (existsSync(webDist)) await app.register(fastifyStatic, { root: webDist, prefix: '/' });
 app.addHook('onClose', async () => { ytdlp.stop(); await jobs.stop(); await codex.stop(); await tasteRepository.close(); });
 try { await app.listen({ port: config.port, host: '127.0.0.1' }); } catch (error) { app.log.error(error); process.exitCode = 1; }

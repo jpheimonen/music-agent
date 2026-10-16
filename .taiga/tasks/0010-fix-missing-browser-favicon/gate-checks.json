@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "No documented command, setting or behavior changes. The server now serves files added by a rebuild without a restart, which needs no docs.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The build passed during the fast checks on this exact change, and no build inputs changed.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "The evaluator already ran npm start on this exact change. A real Chromium tab showed the favicon, and the icons, the 404 pages and the traversal 403 all behaved correctly.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The full server suite (46 of 46) passed in the fast checks. The web adapter tests do not cover this server-only change.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "No dependency, sign-in or secret changes. Path containment comes from @fastify/static's default per-request lookup. Path traversal was tested by hand and returned 403, and I will check it again in the code review.",
+    "command": ""
+  }
+]
