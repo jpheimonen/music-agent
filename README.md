@@ -12,6 +12,10 @@ npm run build
 npm start
 ```
 
+On Linux with a systemd user session, use `npm run service:start` after building to keep Music running when the launching terminal closes. The service restarts on failure. Use `npm run service:status`, `npm run service:logs`, and `npm run service:stop` to manage it. Stop any foreground server before starting the service; run `npm run service:stop` before returning to `npm start` or development. After rebuilding, stop and start the service to load the new code. Environment values set in the launching shell are forwarded for the documented Music settings. The service lasts for the current user session; start it again after a reboot or logout.
+
+If the page says “The local server could not be reached”, check that the server is running (`npm run service:status` and `npm run service:logs` for the background service). An unconfigured MP3 library does not disable the DJ or YouTube.
+
 Open http://127.0.0.1:8787. The server binds loopback only and serves the built frontend and API from one origin. For development, run `npm run dev`, then open http://127.0.0.1:5173; Vite proxies `/api` to the backend. `npm run typecheck` checks all workspaces.
 
 The browser tab shows what is playing. The app can be installed from the browser as a standalone window. Its service worker in `apps/web/public/sw.js` caches only the page shell for offline start-up. API calls and audio always go to the server. After changing the shell, bump `CACHE` in that file.

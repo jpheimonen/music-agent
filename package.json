@@ -11,7 +11,11 @@
     "dev": "npm run dev -w @music/server & npm run dev -w @music/web & wait",
     "build": "npm run build -w @music/contracts && npm run build -w @music/server && npm run build -w @music/web",
     "typecheck": "npm run typecheck --workspaces",
-    "start": "npm run start -w @music/server"
+    "start": "npm run start -w @music/server",
+    "service:start": "node scripts/service.mjs start",
+    "service:stop": "node scripts/service.mjs stop",
+    "service:status": "node scripts/service.mjs status",
+    "service:logs": "node scripts/service.mjs logs"
   },
   "engines": {
     "node": ">=24 <25"
