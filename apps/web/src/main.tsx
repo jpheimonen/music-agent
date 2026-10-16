@@ -814,43 +814,45 @@ function App() {
               </button>
             ))}
           </div>
-          {tab === "radio" ? (
-            <RadioPanel
-              selected={station}
-              onAir={onAirStation}
-              live={radioLive}
-              playing={playing}
-              metadata={metadata}
-              error={stationError}
-              dj={dj}
-              onTune={tuneIn}
-              onRetry={() => {
-                if (onAirStation) void listenRadio(onAirStation);
-              }}
-            />
-          ) : (
-            <>
-              <QueuePanel queue={queue} dj={dj} djPending={djPending} onPlay={playQueued} onDislike={(entry) => void dislikeQueued(entry)} onRemove={removeQueued} />
-              {tab === "local" && (
-                <CollectionPanel
-                  cap={cap}
-                  tracks={tracks}
-                  query={query}
-                  hasMore={Boolean(cursor)}
-                  error={libraryError}
-                  scanStatus={scanStatus}
-                  onQuery={setQuery}
-                  onScan={() => void scan()}
-                  onMore={() => void loadTracks(query, cursor)}
-                  onPlay={(item) => choose(item, "You")}
-                  onAdd={addQueue}
-                />
-              )}
-              {notesArtist && (
-                <ArtistNotes name={notesArtist.displayName} data={artistData} expanded={artistExpanded} onExpand={() => setArtistExpanded((value) => !value)} onRetry={() => void retryArtist()} />
-              )}
-            </>
-          )}
+          <div className="stage-body">
+            {tab === "radio" ? (
+              <RadioPanel
+                selected={station}
+                onAir={onAirStation}
+                live={radioLive}
+                playing={playing}
+                metadata={metadata}
+                error={stationError}
+                dj={dj}
+                onTune={tuneIn}
+                onRetry={() => {
+                  if (onAirStation) void listenRadio(onAirStation);
+                }}
+              />
+            ) : (
+              <>
+                <QueuePanel queue={queue} dj={dj} djPending={djPending} onPlay={playQueued} onDislike={(entry) => void dislikeQueued(entry)} onRemove={removeQueued} />
+                {tab === "local" && (
+                  <CollectionPanel
+                    cap={cap}
+                    tracks={tracks}
+                    query={query}
+                    hasMore={Boolean(cursor)}
+                    error={libraryError}
+                    scanStatus={scanStatus}
+                    onQuery={setQuery}
+                    onScan={() => void scan()}
+                    onMore={() => void loadTracks(query, cursor)}
+                    onPlay={(item) => choose(item, "You")}
+                    onAdd={addQueue}
+                  />
+                )}
+                {notesArtist && (
+                  <ArtistNotes name={notesArtist.displayName} data={artistData} expanded={artistExpanded} onExpand={() => setArtistExpanded((value) => !value)} onRetry={() => void retryArtist()} />
+                )}
+              </>
+            )}
+          </div>
         </div>
       </main>
       {/* The player and its notices stay docked at the bottom of the window. */}
