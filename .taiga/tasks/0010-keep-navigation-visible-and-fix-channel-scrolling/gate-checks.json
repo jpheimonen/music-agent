@@ -1,0 +1,32 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "A layout and styling fix changes no commands, settings or documented behavior.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The production build already passed on the final code during the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Evaluation pass 2 already checked the final commit 6919967 in a real browser at desktop and mobile sizes, and no code has changed since.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "No shared code changed, and the web adapter tests and typecheck passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "The change touches no security-sensitive path and adds no dependencies.",
+    "command": ""
+  }
+]
