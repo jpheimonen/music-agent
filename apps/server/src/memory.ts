@@ -77,6 +77,7 @@ export class DjMemory {
     return message;
   }
 
+  replaceNotes(notes: DjNote[]) { return this.save(data => ({ ...data, notes: notes.slice(-limits.notes) })); }
   removeNote(id: string) { return this.save(data => ({ ...data, notes: data.notes.filter(note => note.id !== id) })); }
   clearConversation() { return this.save(data => ({ ...data, conversation: [] })); }
 

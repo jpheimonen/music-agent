@@ -7,7 +7,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { JobRegistry } from './jobs.js';
-import { capabilities, stationId, mediaId, feedbackId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, djMessageRequest, listeningEvent, type Capabilities } from '@music/contracts';
+import { capabilities, stationId, mediaId, feedbackId, feedbackRequest, scanRequest, youtubeResolveRequest, youtubeSearchQuery, recommendationRequest, djMessageRequest, listeningEvent, tasteExport, type Capabilities, type TasteExport } from '@music/contracts';
 import { LibraryService, LibraryError, parseRange } from './library.js';
 import { stationDescriptors, resolveStation } from './stations.js';
 import { StationNowPlayingService } from './station-now-playing.js';
@@ -133,6 +133,29 @@ app.get('/api/v1/taste', async (request) => {
   if (ids && ids.length > 100) throw new z.ZodError([]);
   ids?.forEach(id => feedbackId.parse(id));
   return tasteRepository.snapshot(ids);
+});
+// Your taste and the DJ's notes in one file, to import on another machine.
+app.get('/api/v1/taste/export', async (_request, reply) => {
+  const { feedbackRevision, files } = tasteRepository.exportFiles();
+  const file: TasteExport = { format: 'music-agent-taste', schemaVersion: 1, exportedAt: new Date().toISOString(), feedbackRevision, files, djNotes: memory.notes };
+  return reply.header('Content-Disposition', `attachment; filename="music-taste-${file.exportedAt.slice(0, 10)}.json"`).send(file);
+});
+// Replaces the current taste and DJ notes with an exported file. Nothing changes if the file is invalid.
+app.post('/api/v1/taste/import', { bodyLimit: 12 * 1024 * 1024 }, async (request, reply) => {
+  const parsed = tasteExport.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send(fail('invalid_import', 'This is not a taste file exported from this app.', 400, request.id).body);
+  try {
+    const taste = await tasteRepository.replaceAll({ files: parsed.data.files, feedbackRevision: parsed.data.feedbackRevision });
+    await memory.replaceNotes(parsed.data.djNotes);
+    scheduleSynthesis();
+    return { taste, memory: memory.snapshot() };
+  } catch (error) {
+    if (error instanceof TasteError) {
+      const status = error.code === 'invalid_import' ? 400 : error.code === 'external_file_change' ? 409 : 503;
+      return reply.code(status).send(fail(error.code, error.message, status, request.id, error.code === 'storage_unavailable').body);
+    }
+    throw error;
+  }
 });
 app.put('/api/v1/feedback/:mediaId', async (request, reply) => {
   const { mediaId: id } = z.object({ mediaId: feedbackId }).parse(request.params);

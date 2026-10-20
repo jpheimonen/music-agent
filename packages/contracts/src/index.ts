@@ -71,6 +71,14 @@ export const djMemory = z.object({ notes: z.array(djNote), conversation: z.array
 // starting: the DJ is already starting music for this message, so the reply should not steer again.
 export const djMessageRequest = z.object({ text: z.string().trim().max(1000), mode: z.enum(['chat', 'interview']), djOn: z.boolean(), starting: z.boolean().optional(), nowPlaying: trackName.nullable().optional() });
 export const djReply = z.object({ message: djMessage, steer: z.string().max(300).nullable(), interviewDone: z.boolean(), memory: djMemory });
+// Your taste in one file, to move it to another machine: the taste files exactly as saved, and the DJ's notes.
+// feedbackRevision says which reactions the summary was written from, so an import knows whether it is still current.
+export const tasteExport = z.object({
+  format: z.literal('music-agent-taste'), schemaVersion: z.literal(1), exportedAt: z.string().datetime(), feedbackRevision: z.number().int().nonnegative(),
+  files: z.object({ 'likes.csv': z.string().max(5_000_000), 'dislikes.csv': z.string().max(5_000_000), 'musical_taste.md': z.string().max(100_000) }),
+  djNotes: z.array(djNote).max(60),
+});
+export const tasteImportResult = z.object({ taste, memory: djMemory });
 // Skips and finished tracks teach the DJ alongside likes and dislikes.
 export const listeningEvent = z.object({ media: mediaItem, outcome: z.enum(['finished', 'skipped']), listenedSeconds: z.number().nonnegative().max(86_400), durationSeconds: z.number().nonnegative().max(86_400).nullable() });
 export type MediaItem = z.infer<typeof mediaItem>;
@@ -88,3 +96,4 @@ export type DjMemory = z.infer<typeof djMemory>;
 export type DjMessageRequest = z.infer<typeof djMessageRequest>;
 export type RadioSong = z.infer<typeof radioSong>;
 export type ListeningEvent = z.infer<typeof listeningEvent>;
+export type TasteExport = z.infer<typeof tasteExport>;

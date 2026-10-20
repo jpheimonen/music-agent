@@ -11,6 +11,7 @@ import {
   stationNowPlaying,
   stationResolution,
   taste,
+  tasteImportResult,
   trackPage,
   type Capabilities,
   type DjMemory,
@@ -675,6 +676,20 @@ function App() {
     }
   };
 
+  // Resolves to a message for the taste dialog; throws when nothing was imported.
+  const importTaste = async (contents: unknown) => {
+    try {
+      const result = await api("/taste/import", tasteImportResult, json(contents));
+      setTasteData(result.taste);
+      setMemory(result.memory);
+      const values = Object.values(result.taste.feedback);
+      const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+      return `Imported ${count(values.filter((value) => value === "like").length, "like")}, ${count(values.filter((value) => value === "dislike").length, "dislike")} and ${count(result.memory.notes.length, "note")}.`;
+    } catch (error) {
+      throw new Error(`Nothing was imported: ${describe(error)}`);
+    }
+  };
+
   // Media keys and the system's media controls.
   const controls = useRef({ togglePlay, skip });
   controls.current = { togglePlay, skip };
@@ -906,7 +921,9 @@ function App() {
           {panel === "setup" ? (
             <SetupContent cap={cap} onRefresh={() => void refreshCapabilities()} />
           ) : (
-            <TasteContent taste={tasteData} memory={memory} codexReady={cap?.codex.state === "ready"} onForget={(id) => void forgetNote(id)} onSetup={() => setPanel("setup")} />
+            <TasteContent taste={tasteData} memory={memory} codexReady={cap?.codex.state === "ready"} onForget={(id) => void forgetNote(id)} onSetup={() => setPanel("setup")}
+              onImport={importTaste}
+            />
           )}
         </dialog>
       )}

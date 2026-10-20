@@ -36,3 +36,16 @@ test('history is bounded and notes can be removed', async () => {
     assert.deepEqual((await DjMemory.open(dir)).snapshot(), { notes: [], conversation: [] });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('imported notes replace the current ones and keep the conversation', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'music-memory-import-'));
+  try {
+    const memory = await DjMemory.open(dir);
+    await memory.recordExchange({ you: 'hi', reply: 'Hello', suggestions: [], addNotes: ['Likes jazz'], removeNoteIds: [] });
+    const notes = [{ id: '3f1c2a52-8a43-4c4b-9a35-0b7f7f0d2d11', text: 'Loves Nick Drake', createdAt: '2026-01-01T00:00:00.000Z' }];
+    await memory.replaceNotes(notes);
+    const reopened = await DjMemory.open(dir);
+    assert.deepEqual(reopened.notes, notes);
+    assert.equal(reopened.conversation.length, 2);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
