@@ -1,4 +1,4 @@
-import type { MediaItem } from '@music/contracts';
+import { artistNameKey, normalizeText, type MediaItem } from '@music/contracts';
 import { YoutubeProviderError, type AudioStream, type SearchEntry, type YtDlp } from './ytdlp.js';
 
 export { YoutubeProviderError };
@@ -21,14 +21,12 @@ export function parseVideoId(input: string): string {
   return id;
 }
 
-export function normalizeText(value: string) {
-  return value.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/&/g, ' and ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-}
+export { normalizeText };
 
 export function youtubeItem(id: string, title = `YouTube video ${id}`, channel?: string, extra: { artist?: string; durationSeconds?: number | null } = {}): MediaItem {
   return {
     id: `youtube:${id}`, source: 'youtube', title,
-    artist: extra.artist ? { id: `name:${normalizeText(extra.artist)}`, displayName: extra.artist, confidence: 'medium', provenance: 'dj_pick' } : null,
+    artist: extra.artist ? { id: artistNameKey(extra.artist), displayName: extra.artist, confidence: 'medium', provenance: 'dj_pick' } : null,
     availability: 'available',
     attribution: channel ? `YouTube · ${channel}` : 'YouTube',
     // The 16:9 thumbnail has no letterbox bars, so a square crop shows the cover art.

@@ -256,7 +256,7 @@ pre {
    the player docked along the bottom so it never scrolls away. */
 .layout {
   display: grid;
-  grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(380px, 1fr) minmax(0, 1fr);
   gap: 36px 32px;
   align-items: start;
 }
@@ -772,8 +772,9 @@ h2 {
 }
 .chat-log {
   list-style: none;
-  margin: 20px 0 0;
-  padding: 4px 6px 4px 0;
+  /* Reaches into the panel's side padding so the conversation gets the full width. */
+  margin: 20px -18px 14px;
+  padding: 4px 12px 4px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -810,36 +811,9 @@ h2 {
   color: var(--muted);
   font-weight: 600;
 }
-.noted {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-.note-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 2px 2px 8px;
-  background: var(--acid);
-  color: var(--black);
-  border: 1px solid var(--black);
-  font-size: 13px;
-  font-weight: 700;
-}
-.note-chip button {
-  border: 0;
-  background: transparent;
-  color: var(--black);
-  font-weight: 900;
-  min-width: 28px;
-  min-height: 28px;
-}
-.note-chip button:hover {
-  background: var(--hot-fill);
-}
 .dj-panel .suggestions {
-  margin: 16px 0 14px;
+  margin: 6px 0 4px;
+  padding: 2px 4px;
 }
 .dj-panel .chip {
   min-height: 38px;
@@ -1184,6 +1158,40 @@ img.player-art {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The artist name and cover open a window about who is playing. */
+.player-artist-button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s;
+}
+.player-artist-button:hover,
+.player-artist-button:focus-visible {
+  text-decoration-color: currentColor;
+}
+.player-art-button {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+.player-art-button:hover .player-art {
+  transform: scale(1.04);
+}
+.player-art-button .player-art {
+  transition: transform 0.15s;
+}
 .player-text .player-reason {
   margin-top: 4px;
   font-size: 13px;
@@ -1398,20 +1406,82 @@ input[type="range"]::-moz-range-thumb {
   margin-top: 14px;
 }
 
-/* Artist notes, for collection tracks with a tagged artist. */
-.artist-panel {
-  border-top: 8px solid var(--uv-fill);
+/* About the artist: a big cover beside the song, the DJ's notes below. */
+dialog.artist-dialog {
+  width: min(820px, calc(100vw - 32px));
 }
-.artist-panel h2 {
-  font-size: 28px;
+.artist-sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: 24px 28px;
+  align-items: end;
+  padding-top: 20px;
+}
+.artist-cover {
+  width: 100%;
+  aspect-ratio: 1;
+}
+img.artist-cover {
+  display: block;
+  object-fit: cover;
+  border: 2px solid var(--ink);
+  box-shadow: 10px 10px 0 var(--uv-fill);
+}
+.artist-facts {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  min-width: 0;
+}
+.artist-facts p {
+  margin: 0;
+}
+.artist-facts .section-label {
+  margin-bottom: 4px;
+}
+.artist-name {
+  font-family: var(--display);
+  font-size: clamp(30px, 5vw, 48px);
+  font-weight: 900;
   font-stretch: 120%;
+  font-style: italic;
   text-transform: uppercase;
   line-height: 0.95;
-  margin-bottom: 14px;
   overflow-wrap: anywhere;
 }
-.artist-panel p {
-  line-height: 1.55;
+.artist-song {
+  font-size: 17px;
+  font-weight: 700;
+}
+.artist-song span {
+  font-weight: 500;
+  color: var(--muted);
+}
+.artist-reason {
+  color: var(--muted);
+  line-height: 1.45;
+}
+.artist-notes {
+  grid-column: 1 / -1;
+  border-top: 2px solid var(--hair);
+  padding-top: 18px;
+}
+.artist-notes p {
+  line-height: 1.6;
+  max-width: 68ch;
+}
+.artist-intro {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .artist-sheet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .artist-cover {
+    max-width: 320px;
+  }
 }
 .provenance {
   color: var(--muted);

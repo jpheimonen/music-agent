@@ -13,6 +13,12 @@ Environment: Ubuntu host, music-agent with a web UI (`apps/web/dist`) and a Code
 ## Testing the DJ UI without the real Codex
 - To exercise the DJ UI while Codex is blocked, use a throwaway Node mock that serves `apps/web/dist` and fakes `/api/v1/capabilities`, `/dj/recommendations`, and `/jobs/:id`. This lets the UI be driven without a working Codex backend.
 
+## Testing the real Codex DJ from a separate server instance
+- To exercise the real Codex DJ from a second server instance, start it with `MUSIC_CODEX_BIN=<checkout>/node_modules/@openai/codex/bin/codex.js`, `MUSIC_DATA_DIR=<temp dir>`, and `MUSIC_PORT=8795`.
+- The server pins Codex 0.156.1; a newer `codex` on PATH (0.162) makes capabilities report `unsupported_codex_version`, so point `MUSIC_CODEX_BIN` at the checkout's pinned binary rather than the PATH one.
+- Driving `/api/v1/dj/messages`, `/dj/recommendations`, and `/artists/:key/info` with a small Node fetch script and polling `/jobs/:id` is a quick, silent way to check prompt tone without playing audio.
+- A "taiga runner request" to start this service once hung for 15 minutes; launching node in the background with `setsid nohup` worked instead.
+
 ## Mock DJ playback is audible — avoid triggering it
 - The saved `music-mock` service returns canned mainstream pop picks (Alan Walker, Despacito and similar), and clicking "Start the DJ" on it makes the YouTube embed actually play with sound, which the user hates.
 - When driving the app with the taiga runner browser, instruct the browser agent not to press Play, Start the DJ, Listen live, or station tiles unless a check needs playback; mute first when it does, and navigate to `about:blank` or stop the browser right after.
