@@ -157,3 +157,79 @@ export function TasteContent(props: {
     </div>
   );
 }
+
+// Who is playing, opened from the player bar: the cover big, the song, and the DJ's notes on the artist.
+export type ArtistSubject = {
+  key: string | null;
+  name: string;
+  song: string;
+  album?: string;
+  reason?: string;
+  context: string;
+  artwork?: string;
+  largeArtwork?: string;
+  link?: { href: string; label: string };
+};
+type ArtistNotes = { status: string; introduction?: string; text?: string; generatedAt?: string } | null;
+
+export function ArtistContent(props: { subject: ArtistSubject; notes: ArtistNotes; codexReady: boolean; onRetry: () => void }) {
+  const { subject, notes } = props;
+  const [art, setArt] = React.useState(subject.largeArtwork ?? subject.artwork);
+  // YouTube answers a missing large thumbnail with a tiny placeholder, so fall back to the normal one.
+  const fallBack = () => setArt((current) => (current !== subject.artwork ? subject.artwork : undefined));
+  return (
+    <div className="artist-sheet">
+      {art ? (
+        <img
+          className="artist-cover"
+          src={art}
+          alt={`Cover for ${subject.song}`}
+          onError={fallBack}
+          onLoad={(event) => {
+            if (event.currentTarget.naturalWidth <= 120) fallBack();
+          }}
+        />
+      ) : (
+        <div className="disc artist-cover" aria-hidden="true" />
+      )}
+      <div className="artist-facts">
+        <p className="section-label">{subject.context}</p>
+        <p className="artist-name">{subject.name}</p>
+        <p className="artist-song">
+          {subject.song}
+          {subject.album && <span> · {subject.album}</span>}
+        </p>
+        {subject.reason && <p className="artist-reason">“{subject.reason}”</p>}
+        {subject.link && (
+          <a className="inline-button" href={subject.link.href} target="_blank" rel="noreferrer">
+            {subject.link.label}
+          </a>
+        )}
+      </div>
+      <div className="artist-notes">
+        {!subject.key ? (
+          <p className="subtle">There's no artist name for this one, so the DJ has nothing to tell about them.</p>
+        ) : !notes || notes.status === "pending" ? (
+          <p className="subtle">
+            <span className="spinner" aria-hidden="true" /> The DJ is digging up the story…
+          </p>
+        ) : notes.status === "cached" ? (
+          <>
+            <p className="artist-intro">{notes.introduction}</p>
+            {notes.text && <p className="long-copy">{notes.text}</p>}
+            <p className="provenance">Written by AI · {notes.generatedAt ? new Date(notes.generatedAt).toLocaleDateString() : "recently"}</p>
+          </>
+        ) : notes.status === "unavailable" ? (
+          <p className="subtle">{props.codexReady ? "No notes on this artist." : "Artist notes need the DJ's Codex login. Check Setup."}</p>
+        ) : (
+          <p className="subtle">
+            Couldn't get the story on this one. The music keeps playing.{" "}
+            <button className="inline-button" onClick={props.onRetry}>
+              Retry
+            </button>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

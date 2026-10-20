@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { recommendationRequest, recommendationResult, artistInfo, type DjMessageRequest, type MediaItem, type RecommendationRequest } from '@music/contracts';
+import { recommendationRequest, recommendationResult, artistInfo, artistNameKey, type DjMessageRequest, type MediaItem, type RecommendationRequest } from '@music/contracts';
 import { CodexRunner, CodexError } from './codex.js';
 import { LibraryService } from './library.js';
 import type { DjMemory } from './memory.js';
 import { TasteRepository } from './taste.js';
 import { YoutubeService, normalizeText } from './youtube.js';
 
+// The name the player shows for an artist, and a song of theirs to tell namesakes apart.
+export type ArtistRef = { name?: string; song?: string };
 const clean = (value: string) => value.slice(0, 500).replace(/[\u0000-\u001f]/g, ' ');
 // One key per song, whichever video or file carries it.
 const songKey = (artist: string | null, title: string) => `${normalizeText(artist ?? '')}|${normalizeText(title)}`;
@@ -127,26 +129,32 @@ export class DjService {
     }
     return null;
   }
-  hasArtist(key: string) { return Boolean(this.knownArtist(key)); }
+  // Local artists come from your files' tags. Anyone else, such as a DJ pick from
+  // YouTube or a song on the radio, is known by the name the player shows.
+  private identity(key: string, ref: ArtistRef) {
+    if (!key.startsWith('name:')) return this.knownArtist(key);
+    const name = ref.name?.trim();
+    return name && key.length > 5 && artistNameKey(name) === key ? { displayName:name.slice(0,200), provenance:'name' } : null;
+  }
+  hasArtist(key: string, ref: ArtistRef = {}) { return Boolean(this.identity(key, ref)); }
   private cachePath(key: string) { return join(this.dataDir, 'artist-cache', createHash('sha256').update(`v1:en:${key}`).digest('hex') + '.json'); }
-  async artist(key: string) {
-    const identity = this.knownArtist(key);
-    if (!identity) return artistInfo.parse({ artistKey:key, status:'unavailable' });
+  async artist(key: string, ref: ArtistRef = {}) {
+    if (!this.identity(key, ref)) return artistInfo.parse({ artistKey:key, status:'unavailable' });
     try {
       const cached = artistInfo.parse(JSON.parse(await readFile(this.cachePath(key),'utf8')));
       if (cached.artistKey === key && cached.status === 'cached') return cached;
     } catch { /* cache miss */ }
     return artistInfo.parse({ artistKey:key, status:this.inflightArtists.has(key) ? 'pending' : (this.artistFailures.get(key) ?? 0) > Date.now() ? 'failed' : 'unavailable' });
   }
-  async describeArtist(key: string, signal?: AbortSignal, refresh = false) {
-    const identity = this.knownArtist(key);
+  async describeArtist(key: string, signal?: AbortSignal, refresh = false, ref: ArtistRef = {}) {
+    const identity = this.identity(key, ref);
     if (!identity) return artistInfo.parse({ artistKey:key, status:'unavailable' });
-    if (!refresh) { const cached = await this.artist(key); if (cached.status === 'cached') return cached; }
+    if (!refresh) { const cached = await this.artist(key, ref); if (cached.status === 'cached') return cached; }
     if ((this.artistFailures.get(key) ?? 0) > Date.now()) throw new CodexError('provider_unavailable');
     const existing = this.inflightArtists.get(key);
     if (existing) return existing;
     const work = (async () => {
-      const generated = await this.codex.run('describeArtist', { artistKey:key, displayName:identity.displayName, provenance:identity.provenance, instruction:'Describe this artist conservatively. If uncertain, say so. Do not invent citations.' }, signal);
+      const generated = await this.codex.run('describeArtist', { artistKey:key, displayName:identity.displayName, provenance:identity.provenance, song:ref.song?.slice(0,200) ?? null }, signal);
       if (signal?.aborted) throw new CodexError('cancelled',false);
       const record = artistInfo.parse({ artistKey:key,status:'cached',generatedAt:new Date().toISOString(),introduction:generated.introduction,text:generated.text,provenance:'Codex 0.156.1' });
       const path = this.cachePath(key); await mkdir(join(this.dataDir,'artist-cache'),{recursive:true,mode:0o700});

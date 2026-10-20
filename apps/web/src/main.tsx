@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   artistInfo,
+  artistNameKey,
   capabilities,
   djMemory,
   feedbackResponse,
@@ -40,8 +41,8 @@ import {
 } from "./model";
 import { PlayerBar } from "./player-bar";
 import { DjPanel } from "./dj-panel";
-import { ArtistNotes, CollectionPanel, QueuePanel, RadioPanel } from "./panels";
-import { SetupContent, TasteContent } from "./dialogs";
+import { CollectionPanel, QueuePanel, RadioPanel } from "./panels";
+import { ArtistContent, SetupContent, TasteContent, type ArtistSubject } from "./dialogs";
 import "@fontsource-variable/archivo/wdth.css";
 import "@fontsource-variable/archivo/wdth-italic.css";
 import "@fontsource/silkscreen/latin-400.css";
@@ -125,8 +126,8 @@ function App() {
   const reactions = useRef<Promise<unknown>>(Promise.resolve());
   const [toast, setToast] = useState<Toast | null>(null);
   const [artistData, setArtistData] = useState<ReturnType<typeof artistInfo.parse> | null>(null);
-  const [artistExpanded, setArtistExpanded] = useState(false);
-  const [panel, setPanel] = useState<"setup" | "taste" | null>(null);
+  const [artistSubject, setArtistSubject] = useState<ArtistSubject | null>(null);
+  const [panel, setPanel] = useState<"setup" | "taste" | "artist" | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const invoker = useRef<HTMLElement | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -395,27 +396,28 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Artist notes are written only for artists named in your files' tags.
-  const notesArtist = track?.media.artist && track.media.artist.confidence !== "low" && track.media.artist.provenance === "id3" ? track.media.artist : null;
+  // The DJ's notes on the artist load when you open them from the player bar.
+  const artistKey = panel === "artist" ? (artistSubject?.key ?? null) : null;
+  const artistPath = (subject: ArtistSubject, suffix = "") =>
+    `/artists/${encodeURIComponent(subject.key ?? "")}/info${suffix}?${new URLSearchParams({ name: subject.name, song: subject.song })}`;
   useEffect(() => {
     setArtistData(null);
-    setArtistExpanded(false);
-    if (!notesArtist) return;
+    if (!artistKey || !artistSubject) return;
     let active = true;
-    void api(`/artists/${encodeURIComponent(notesArtist.id)}/info`, artistInfo)
+    void api(artistPath(artistSubject), artistInfo)
       .then((data) => {
-        if (active && data.artistKey === notesArtist.id) setArtistData(data);
+        if (active && data.artistKey === artistKey) setArtistData(data);
       })
       .catch(() => {
-        if (active) setArtistData({ artistKey: notesArtist.id, status: "failed" });
+        if (active) setArtistData({ artistKey, status: "failed" });
       });
     return () => {
       active = false;
     };
-  }, [notesArtist?.id]);
+  }, [artistKey]);
   useEffect(() => {
-    if (artistData?.status !== "pending" || !artistData.jobId || !notesArtist) return;
-    const key = notesArtist.id,
+    if (artistData?.status !== "pending" || !artistData.jobId || !artistKey || !artistSubject) return;
+    const subject = artistSubject,
       id = artistData.jobId;
     let active = true;
     const timer = window.setInterval(() => {
@@ -424,15 +426,15 @@ function App() {
           if (!active || state.status === "queued" || state.status === "running") return;
           window.clearInterval(timer);
           if (state.status === "succeeded")
-            void api(`/artists/${encodeURIComponent(key)}/info`, artistInfo).then((info) => {
-              if (active && info.artistKey === key) setArtistData(info);
+            void api(artistPath(subject), artistInfo).then((info) => {
+              if (active && info.artistKey === artistKey) setArtistData(info);
             });
-          else setArtistData({ artistKey: key, status: "failed" });
+          else setArtistData({ artistKey, status: "failed" });
         })
         .catch(() => {
           if (active) {
             window.clearInterval(timer);
-            setArtistData({ artistKey: key, status: "failed" });
+            setArtistData({ artistKey, status: "failed" });
           }
         });
     }, 1500);
@@ -440,15 +442,46 @@ function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [artistData?.status, artistData?.jobId, notesArtist?.id]);
+  }, [artistData?.status, artistData?.jobId, artistKey]);
   const retryArtist = async () => {
-    if (!notesArtist) return;
+    if (!artistKey || !artistSubject) return;
     try {
-      const accepted = await api(`/artists/${encodeURIComponent(notesArtist.id)}/info/refresh`, jobAccepted, json({}));
-      setArtistData({ artistKey: notesArtist.id, status: "pending", jobId: accepted.jobId });
+      const accepted = await api(artistPath(artistSubject, "/refresh"), jobAccepted, json({}));
+      setArtistData({ artistKey, status: "pending", jobId: accepted.jobId });
     } catch {
-      setArtistData({ artistKey: notesArtist.id, status: "failed" });
+      setArtistData({ artistKey, status: "failed" });
     }
+  };
+  // What the player bar shows right now, kept as it was when you opened it.
+  const openArtist = (event: React.MouseEvent<HTMLElement>) => {
+    let subject: ArtistSubject | null = null;
+    if (track) {
+      const media = track.media;
+      const artist = media.artist;
+      const videoId = media.source === "youtube" ? media.id.slice("youtube:".length) : null;
+      subject = {
+        key: artist ? (artist.provenance === "id3" ? artist.id : artistNameKey(artist.displayName)) : null,
+        name: artist?.displayName || artistOf(media),
+        song: media.title,
+        album: media.album,
+        reason: track.reason,
+        context: track.origin === "You" ? "Added by you" : "DJ pick",
+        artwork: media.artwork,
+        largeArtwork: videoId ? `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg` : media.artwork,
+        link: videoId ? { href: `https://www.youtube.com/watch?v=${videoId}`, label: "Watch on YouTube" } : undefined,
+      };
+    } else if (onAirStation && metadata?.status === "current" && metadata.kind === "track") {
+      subject = {
+        key: metadata.artist ? artistNameKey(metadata.artist) : null,
+        name: metadata.artist || "Unknown artist",
+        song: metadata.title,
+        context: `On air · ${stationLabel(onAirStation)}`,
+      };
+    }
+    if (!subject) return;
+    invoker.current = event.currentTarget;
+    setArtistSubject(subject);
+    setPanel("artist");
   };
 
   useEffect(() => {
@@ -693,16 +726,18 @@ function App() {
   // Media keys and the system's media controls.
   const controls = useRef({ togglePlay, skip });
   controls.current = { togglePlay, skip };
-  const tabTitle = track ? track.media.title : onAirStation ? (metadata?.status === "current" ? metadata.title : stationLabel(onAirStation)) : "";
+  const songTitle = track ? track.media.title : onAirStation ? (metadata?.status === "current" ? metadata.title : stationLabel(onAirStation)) : "";
+  // The browser tab names the artist; the song title falls back when the artist is unknown.
+  const tabTitle = track ? track.media.artist?.displayName || track.media.title : onAirStation && metadata?.status === "current" ? metadata.artist || metadata.title : songTitle;
   useEffect(() => {
     document.title = tabTitle ? `${tabTitle} · Listening room` : "Listening room";
   }, [tabTitle]);
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
-    const title = tabTitle;
+    const title = songTitle;
     const artist = track ? artistOf(track.media) : onAirStation ? (metadata?.status === "current" ? metadata.artist || stationLabel(onAirStation) : stationNote(onAirStation)) : "";
     navigator.mediaSession.metadata = title ? new MediaMetadata({ title, artist, artwork: track?.media.artwork ? [{ src: track.media.artwork }] : [] }) : null;
-  }, [tabTitle, track, onAirStation, metadata]);
+  }, [songTitle, track, onAirStation, metadata]);
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
     const handlers: [MediaSessionAction, MediaSessionActionHandler | null][] = [
@@ -740,6 +775,8 @@ function App() {
       : dj
         ? ["The DJ is on", "Picking your first track"]
         : ["Tell the DJ what you want", "YouTube", "Your collection", "Live radio"];
+
+  const panelTitle = panel === "setup" ? "Setup" : panel === "taste" ? "Your taste" : "About the artist";
 
   return (
     <div className="app-shell">
@@ -862,9 +899,6 @@ function App() {
                     onAdd={addQueue}
                   />
                 )}
-                {notesArtist && (
-                  <ArtistNotes name={notesArtist.displayName} data={artistData} expanded={artistExpanded} onExpand={() => setArtistExpanded((value) => !value)} onRetry={() => void retryArtist()} />
-                )}
               </>
             )}
           </div>
@@ -908,17 +942,26 @@ function App() {
           onSeek={(seconds) => player.seek(seconds)}
           onVolume={(value) => player.setVolume(value)}
           onMute={() => player.toggleMute()}
+          onArtist={openArtist}
         />
       </div>
       {panel && (
-        <dialog ref={dialog} aria-label={panel === "setup" ? "Setup" : "Your taste"}>
+        <dialog ref={dialog} className={panel === "artist" ? "artist-dialog" : undefined} aria-label={panelTitle}>
           <div className="dialog-header">
-            <h2>{panel === "setup" ? "Setup" : "Your taste"}</h2>
+            <h2>{panelTitle}</h2>
             <button className="text-button" onClick={() => dialog.current?.close()}>
               Close
             </button>
           </div>
-          {panel === "setup" ? (
+          {panel === "artist" && artistSubject ? (
+            <ArtistContent
+              key={`${artistSubject.key}|${artistSubject.song}`}
+              subject={artistSubject}
+              notes={artistData}
+              codexReady={cap?.codex.state === "ready"}
+              onRetry={() => void retryArtist()}
+            />
+          ) : panel === "setup" ? (
             <SetupContent cap={cap} onRefresh={() => void refreshCapabilities()} />
           ) : (
             <TasteContent taste={tasteData} memory={memory} codexReady={cap?.codex.state === "ready"} onForget={(id) => void forgetNote(id)} onSetup={() => setPanel("setup")}

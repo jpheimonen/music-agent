@@ -23,6 +23,7 @@ type Props = {
   onSeek: (seconds: number) => void;
   onVolume: (value: number) => void;
   onMute: () => void;
+  onArtist: (event: React.MouseEvent<HTMLElement>) => void;
 };
 
 // The deck stays on screen at the bottom: what's on, and every control for it.
@@ -40,6 +41,14 @@ export function PlayerBar(props: Props) {
   const toggleLabel = station
     ? props.radioLive ? "Stop" : playback.status === "needsGesture" ? "Play" : "Listen live"
     : playing ? "Pause" : "Play";
+  const artistLine = track
+    ? artistOf(track.media)
+    : station
+      ? onAir ? onAir.artist || (onAir.kind === "programme" ? "On air now" : stationLabel(station)) : stationNote(station)
+      : "It starts here and keeps going.";
+  // A track, or a song the station names, opens a window about who is playing.
+  const aboutArtist = Boolean(track) || onAir?.kind === "track";
+  const art = track?.media.artwork ? <img className="player-art" src={track.media.artwork} alt="" /> : <div className="disc player-art" aria-hidden="true" />;
   const duration = track && playback.duration && playback.duration > 0 ? playback.duration : null;
 
   return (
@@ -51,7 +60,14 @@ export function PlayerBar(props: Props) {
       )}
       <div className="player-inner">
         <div className="player-identity">
-          {track?.media.artwork ? <img className="player-art" src={track.media.artwork} alt="" /> : <div className="disc player-art" aria-hidden="true" />}
+          {/* The cover opens the artist too; the artist name is the keyboard route. */}
+          {aboutArtist ? (
+            <button className="player-art-button" tabIndex={-1} aria-hidden="true" onClick={props.onArtist}>
+              {art}
+            </button>
+          ) : (
+            art
+          )}
           <div className="player-text">
             <p className="player-state">
               <span className="eq" aria-hidden="true">
@@ -66,7 +82,13 @@ export function PlayerBar(props: Props) {
             </p>
             <p className="player-title">{track ? track.media.title : station ? onAir?.title || stationLabel(station) : "Ask the DJ for music"}</p>
             <p className="player-artist">
-              {track ? artistOf(track.media) : station ? (onAir ? onAir.artist || (onAir.kind === "programme" ? "On air now" : stationLabel(station)) : stationNote(station)) : "It starts here and keeps going."}
+              {aboutArtist ? (
+                <button className="player-artist-button" title={`More about ${artistLine}`} onClick={props.onArtist}>
+                  {artistLine}
+                </button>
+              ) : (
+                artistLine
+              )}
             </p>
             {track?.reason && (
               <p className="player-reason" title={track.reason}>

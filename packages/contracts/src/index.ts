@@ -32,6 +32,12 @@ export const stationCatalog = {
 export const stationId = z.enum(Object.keys(stationCatalog) as (keyof typeof stationCatalog)[]);
 export const source = z.enum(['local', 'youtube']);
 export const availability = z.enum(['available', 'unavailable']);
+// Lowercase words without accents or punctuation, so names and titles compare however they are written.
+export function normalizeText(value: string) {
+  return value.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/&/g, ' and ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+// The key for an artist known only by name, such as a DJ pick from YouTube or a song on the radio.
+export const artistNameKey = (name: string) => `name:${normalizeText(name)}`;
 export const artist = z.object({ id: z.string(), displayName: z.string(), confidence: z.enum(['high', 'medium', 'low']), provenance: z.string() });
 export const mediaItem = z.object({ id: mediaId, source, title: z.string(), artist: artist.nullable(), album: z.string().optional(), durationSeconds: z.number().nonnegative().optional(), artwork: z.string().url().optional(), availability, attribution: z.string().optional() });
 export const apiError = z.object({ error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean(), requestId: z.string(), details: z.unknown().optional() }) });

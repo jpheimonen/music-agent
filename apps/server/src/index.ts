@@ -207,23 +207,26 @@ app.post('/api/v1/listening', async (request, reply) => {
   await memory.recordPlay(listeningEvent.parse(request.body));
   return reply.code(204).send();
 });
+// Artists known only by name, such as YouTube picks and radio songs, send that name and a song of theirs.
+const artistRef = z.object({ name:z.string().trim().min(1).max(200).optional(), song:z.string().trim().min(1).max(300).optional() });
 app.get('/api/v1/artists/:key/info', async request => {
   const { key } = z.object({ key:z.string().min(1).max(200) }).parse(request.params);
-  const current = await dj.artist(key);
-  if (current.status === 'cached' || current.status === 'failed' || !dj.hasArtist(key) || codex.capability.state !== 'ready') return current;
+  const ref = artistRef.parse(request.query);
+  const current = await dj.artist(key, ref);
+  if (current.status === 'cached' || current.status === 'failed' || !dj.hasArtist(key, ref) || codex.capability.state !== 'ready') return current;
   const existing = artistJobs.get(key);
   if (existing && ['queued','running'].includes(jobs.get(existing)?.status ?? '')) return { artistKey:key, status:'pending', jobId:existing };
-  const job = jobs.start('describeArtist', signal => dj.describeArtist(key, signal));
+  const job = jobs.start('describeArtist', signal => dj.describeArtist(key, signal, false, ref));
   artistJobs.set(key,job.id);
   void jobs.settled(job.id).then(() => { if (artistJobs.get(key) === job.id) artistJobs.delete(key); });
   return { artistKey:key, status:'pending', jobId:job.id };
 });
 app.post('/api/v1/artists/:key/info/refresh', async (request, reply) => {
   const { key } = z.object({ key:z.string().min(1).max(200) }).parse(request.params);
+  const ref = artistRef.parse(request.query);
   if (codex.capability.state !== 'ready') return reply.code(503).send(fail('setup_required', codex.capability.reason ?? 'Your existing Codex login is unavailable.', 503, request.id).body);
-  const current = await dj.artist(key);
-  if (!dj.hasArtist(key)) return reply.code(404).send(fail('identity_uncertain','Artist identity is unavailable.',404,request.id).body);
-  const job = jobs.start('describeArtist', signal => dj.describeArtist(key, signal, true));
+  if (!dj.hasArtist(key, ref)) return reply.code(404).send(fail('identity_uncertain','Artist identity is unavailable.',404,request.id).body);
+  const job = jobs.start('describeArtist', signal => dj.describeArtist(key, signal, true, ref));
   artistJobs.set(key,job.id);
   void jobs.settled(job.id).then(() => { if (artistJobs.get(key) === job.id) artistJobs.delete(key); });
   return reply.code(202).send({jobId:job.id});

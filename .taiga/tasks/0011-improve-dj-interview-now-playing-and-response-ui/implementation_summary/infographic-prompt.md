@@ -1,0 +1,7 @@
+# Infographic generation
+
+Generated with the native image_gen tool. The image is a conceptual illustration, not an application screenshot.
+
+Prompt:
+
+Use case: infographic-diagram. Make a polished landscape editorial infographic for a pull request about a personal music DJ app. A conceptual illustrated record sleeve opens like a gatefold: left inside is conversation, right inside is discovering the artist, with a single vinyl groove visually connecting both. Cream paper, black ink, acid lime and violet accents, chunky italic music magazine typography matching a bold listening-room UI. Clear large text, very few words. Heading exactly: "More music. Less machinery." Left text exactly: "Start with favourite bands" and "Quick replies stay in the conversation". Small tucked-away liner-note pocket labelled exactly "Taste notes saved quietly". Center black vinyl label exactly "Talk about the songs". Right gatefold has generic abstract cover artwork enlarging beside artist liner notes, connected to a small clickable artist label by an arrow. Right text exactly: "Click the artist" and "Open the artwork and story". Along the top edge a browser-tab-shaped label exactly "Artist · Listening room". This is a conceptual explanation of real behavior, NOT a screenshot or invented UI. No metrics, commits, tests, checks, line counts, code or extra claims. Spacious readable composition, crisp flat print design with subtle paper texture.

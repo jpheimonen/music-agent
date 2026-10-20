@@ -64,6 +64,24 @@ test('artist generation coalesces and persists a reusable cache record', async (
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
 
+test('artists known only by name get notes when the name matches their key', async () => {
+  const dir = await mkdtemp(join(tmpdir(),'music-artist-'));
+  try {
+    const inputs=[];
+    const runner = { async run(kind,input) { inputs.push(input); return {introduction:'Finnish psych rock.',text:'Started in Helsinki.'}; } };
+    const library = { page:() => ({items:[],nextCursor:null}) };
+    const service = new DjService(runner,library,{},{ snapshot:() => ({}) },dir,blank);
+    const ref = { name:'Kingston Wall', song:'Mushrooms' };
+    assert.equal((await service.describeArtist('name:kingston wall',undefined,false,ref)).status,'cached');
+    assert.deepEqual([inputs[0].displayName,inputs[0].song],['Kingston Wall','Mushrooms']);
+    assert.equal((await service.artist('name:kingston wall',{name:'kingston WALL'})).status,'cached');
+    assert.equal((await service.artist('name:kingston wall',{name:'Other Band'})).status,'unavailable');
+    assert.equal((await service.artist('name:kingston wall')).status,'unavailable');
+    assert.equal(service.hasArtist('name:',{name:'!!!'}),false);
+    assert.equal(inputs.length,1);
+  } finally { await rm(dir,{recursive:true,force:true}); }
+});
+
 const youtubeMedia = (id, title, artist) => ({ id:`youtube:${id}`, source:'youtube', title, artist:{id:`name:${artist.toLowerCase()}`,displayName:artist,confidence:'medium',provenance:'dj_pick'}, availability:'available', attribution:'YouTube', artwork:`https://i.ytimg.com/vi/${id}/hqdefault.jpg` });
 const youtubeTaste = feedback => ({ snapshot() { return {feedbackRevision:1,summaryRevision:1,summaryMarkdown:'Krautrock',feedback,summaryStatus:'current'}; }, agentContext() { return []; } });
 
