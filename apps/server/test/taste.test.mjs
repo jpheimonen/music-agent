@@ -43,3 +43,65 @@ test('a radio like must name the song it was given the ID for', async () => {
     assert.equal(repo.snapshot().feedbackRevision, 0);
   });
 });
+
+test('exported taste imports unchanged into a fresh data directory', async () => {
+  await withRepo(async (source) => {
+    const id = radioSongId(song);
+    await source.react({ mediaId: id, reaction: 'like', expectedRevision: 0, idempotencyKey: 'export-like-1', radioSong: song });
+    await source.react({ mediaId: 'youtube:abcdefghijk', reaction: 'dislike', expectedRevision: 1, idempotencyKey: 'export-dislike-1', media: { id: 'youtube:abcdefghijk', source: 'youtube', title: 'Loud, "very" loud', artist: { id: 'name:band', displayName: 'Band', confidence: 'medium', provenance: 'dj_pick' }, availability: 'available' } });
+    await source.commitSummary({ body: 'You like quiet folk.', basedOnFeedbackRevision: 2, expectedSummaryRevision: 0 });
+    const exported = JSON.parse(JSON.stringify(source.exportFiles()));
+    await withRepo(async (target, dir, reopen) => {
+      await target.react({ mediaId: 'youtube:zzzzzzzzzzz', reaction: 'like', expectedRevision: 0, idempotencyKey: 'target-like-1' });
+      const imported = await target.replaceAll(exported);
+      assert.deepEqual(imported.feedback, source.snapshot().feedback);
+      assert.equal(imported.summaryMarkdown, 'You like quiet folk.\n');
+      assert.equal(imported.summaryStatus, 'current');
+      assert.equal(imported.feedbackRevision, 2);
+      assert.equal(await readFile(join(dir, 'likes.csv'), 'utf8'), exported.files['likes.csv']);
+      assert.equal(await readFile(join(dir, 'dislikes.csv'), 'utf8'), exported.files['dislikes.csv']);
+      const again = await reopen();
+      assert.deepEqual(again.snapshot(), imported);
+      await again.react({ mediaId: id, reaction: 'neutral', expectedRevision: 2, idempotencyKey: 'target-unlike-1' });
+    });
+  });
+});
+
+test('an imported summary that was out of date is rewritten from the imported reactions', async () => {
+  await withRepo(async (source) => {
+    await source.commitSummary({ body: 'Old notes.', basedOnFeedbackRevision: 0, expectedSummaryRevision: 0 });
+    await source.react({ mediaId: radioSongId(song), reaction: 'like', expectedRevision: 0, idempotencyKey: 'stale-like-1', radioSong: song });
+    const exported = source.exportFiles();
+    await withRepo(async (target) => {
+      const imported = await target.replaceAll(exported);
+      assert.equal(imported.summaryStatus, 'pending');
+      assert.equal(imported.summaryMarkdown, 'Old notes.\n');
+    });
+  });
+});
+
+test('an invalid taste file is rejected and the current taste is kept', async () => {
+  await withRepo(async (repo, dir) => {
+    await repo.react({ mediaId: radioSongId(song), reaction: 'like', expectedRevision: 0, idempotencyKey: 'keep-like-1', radioSong: song });
+    const before = await readFile(join(dir, 'likes.csv'), 'utf8');
+    const good = repo.exportFiles();
+    const broken = [
+      { ...good.files, 'likes.csv': 'not,a,taste,file\n' },
+      { ...good.files, 'musical_taste.md': 'no front matter' },
+      { ...good.files, 'dislikes.csv': good.files['likes.csv'] },
+    ];
+    for (const files of broken) await assert.rejects(repo.replaceAll({ files, feedbackRevision: 1 }), error => error.code === 'invalid_import');
+    assert.equal(await readFile(join(dir, 'likes.csv'), 'utf8'), before);
+    assert.equal(repo.snapshot().feedbackRevision, 1);
+  });
+});
+
+test('importing taste without a summary shows no summary', async () => {
+  await withRepo(async (source) => {
+    const exported = source.exportFiles();
+    await withRepo(async (target) => {
+      await target.commitSummary({ body: 'Notes to replace.', basedOnFeedbackRevision: 0, expectedSummaryRevision: 0 });
+      assert.equal((await target.replaceAll(exported)).summaryMarkdown, null);
+    });
+  });
+});

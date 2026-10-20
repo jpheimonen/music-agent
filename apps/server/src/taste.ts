@@ -21,7 +21,7 @@ type Row = { mediaId: string; source: 'local' | 'youtube' | 'radio'; title: stri
 type State = { manifest: Manifest; files: Record<Name, string>; likes: Map<string, Row>; dislikes: Map<string, Row> };
 
 export class TasteError extends Error {
-  constructor(public code: 'revision_conflict' | 'external_file_change' | 'storage_unavailable', message: string) { super(message); }
+  constructor(public code: 'revision_conflict' | 'external_file_change' | 'storage_unavailable' | 'invalid_import', message: string) { super(message); }
 }
 
 function csvCells(input: string): string[][] {
@@ -217,8 +217,9 @@ export class TasteRepository {
     const { manifest, likes, dislikes, files } = this.state;
     const feedback: Record<string, 'like' | 'dislike'> = {};
     for (const id of ids ?? [...new Set([...likes.keys(), ...dislikes.keys()])]) { if (likes.has(id)) feedback[id] = 'like'; else if (dislikes.has(id)) feedback[id] = 'dislike'; }
+    const body = files['musical_taste.md'].replace(/^---\n[\s\S]*?\n---\n/, '');
     const summaryStatus = this.synthesis === 'failed' ? 'failed' : this.synthesis === 'pending' || manifest.basedOnFeedbackRevision !== manifest.feedbackRevision ? 'pending' : 'current';
-    return { feedbackRevision: manifest.feedbackRevision, summaryRevision: manifest.summaryRevision, summaryStatus, summaryMarkdown: manifest.summaryRevision ? files['musical_taste.md'].replace(/^---\n[\s\S]*?\n---\n/, '') : null, feedback };
+    return { feedbackRevision: manifest.feedbackRevision, summaryRevision: manifest.summaryRevision, summaryStatus, summaryMarkdown: body.trim() ? body : null, feedback };
   }
   agentContext(limit = 40) {
     const entries = [
@@ -259,6 +260,27 @@ export class TasteRepository {
       const manifest: Manifest = { ...this.state.manifest, feedbackRevision: nextRevision, hashes: Object.fromEntries(names.map(n => [n, digest(files[n])])), receipts };
       await this.commit(files, manifest);
       return { mediaId: input.mediaId, reaction: input.reaction, feedbackRevision: nextRevision };
+    });
+  }
+  // The taste files exactly as saved, and the feedback revision the summary's based_on_feedback_revision refers to.
+  exportFiles() { return { feedbackRevision: this.state.manifest.feedbackRevision, files: { ...this.state.files } }; }
+  // Replaces all taste with files exported from another machine. Revisions keep counting up from this
+  // machine's, and the summary stays current only if it was current where it was exported.
+  async replaceAll(input: { files: Record<Name, string>; feedbackRevision: number }) {
+    return this.serialize(async () => {
+      let summary: ReturnType<typeof summaryFrontmatter>;
+      try {
+        const likes = parseCsv(input.files['likes.csv']), dislikes = parseCsv(input.files['dislikes.csv']);
+        for (const id of likes.keys()) if (dislikes.has(id)) throw new Error('A song is both liked and disliked');
+        summary = summaryFrontmatter(input.files['musical_taste.md']);
+      } catch (e) { throw new TasteError('invalid_import', `The taste file is not valid: ${(e as Error).message}.`); }
+      await this.ensureUnchanged();
+      const feedbackRevision = this.state.manifest.feedbackRevision + 1, summaryRevision = this.state.manifest.summaryRevision + 1;
+      const basedOn = summary.revision > 0 && summary.basedOn === input.feedbackRevision ? feedbackRevision : null;
+      const body = input.files['musical_taste.md'].replace(/^---\n[\s\S]*?\n---\n/, '');
+      const files = { 'likes.csv': input.files['likes.csv'], 'dislikes.csv': input.files['dislikes.csv'], 'musical_taste.md': markdown(summaryRevision, basedOn, body) };
+      const manifest: Manifest = { ...this.state.manifest, feedbackRevision, summaryRevision, basedOnFeedbackRevision: basedOn, hashes: Object.fromEntries(names.map(n => [n, digest(files[n])])) };
+      await this.commit(files, manifest); this.synthesis = 'idle'; return this.snapshot();
     });
   }
   // Trusted Codex boundary: generated narrative only, never explicit feedback rows.

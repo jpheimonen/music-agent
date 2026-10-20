@@ -1,0 +1,38 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The change already updates the README to cover export and import, and I will check that during review.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The build passed in the fast checks on the final commit.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "Work already ran a two-server round trip and the browser checks on the same commit 0d7df01, which has not changed since.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "tests-server is the whole server suite and it passed in the fast checks, together with the web adapter tests.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": true,
+    "reason": "The change adds handling for uploaded input that writes to files on disk.",
+    "command": ""
+  },
+  {
+    "check": "design_system",
+    "run": false,
+    "reason": "The task folder has no design-system.json.",
+    "command": ""
+  }
+]

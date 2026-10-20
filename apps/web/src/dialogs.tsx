@@ -41,8 +41,41 @@ export function SetupContent(props: { cap: Capabilities | null; onRefresh: () =>
 
 type Taste = { summaryStatus: string; summaryMarkdown: string | null; feedback: Record<string, string> };
 
-export function TasteContent(props: { taste: Taste | null; memory: DjMemory | null; codexReady: boolean; onForget: (id: string) => void; onSetup: () => void }) {
+export function TasteContent(props: {
+  taste: Taste | null;
+  memory: DjMemory | null;
+  codexReady: boolean;
+  onForget: (id: string) => void;
+  onSetup: () => void;
+  onImport: (contents: unknown) => Promise<string>;
+}) {
   const { taste, memory } = props;
+  const picker = React.useRef<HTMLInputElement>(null);
+  // A chosen file waits here until you confirm that it replaces your taste.
+  const [chosen, setChosen] = React.useState<{ name: string; contents: unknown } | null>(null);
+  const [importStatus, setImportStatus] = React.useState({ text: "", failed: false, busy: false });
+  const chooseFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      setChosen({ name: file.name, contents: JSON.parse(await file.text()) });
+      setImportStatus({ text: "", failed: false, busy: false });
+    } catch {
+      setChosen(null);
+      setImportStatus({ text: "That file isn’t a taste export. Choose the .json file you exported.", failed: true, busy: false });
+    }
+  };
+  const confirmImport = async () => {
+    if (!chosen) return;
+    setImportStatus({ text: "Importing…", failed: false, busy: true });
+    try {
+      setImportStatus({ text: await props.onImport(chosen.contents), failed: false, busy: false });
+    } catch (error) {
+      setImportStatus({ text: error instanceof Error ? error.message : String(error), failed: true, busy: false });
+    }
+    setChosen(null);
+  };
   const reactions = Object.values(taste?.feedback ?? {});
   const waiting = taste?.summaryStatus === "pending" && !props.codexReady;
   return (
@@ -87,6 +120,39 @@ export function TasteContent(props: { taste: Taste | null; memory: DjMemory | nu
           {taste.summaryStatus === "failed" && <p className="error-text">Updating your taste notes failed. Your reactions are still saved.</p>}
           {taste.summaryMarkdown ? <div className="taste-summary">{taste.summaryMarkdown}</div> : <p>No taste notes yet. Like a few tracks to get started.</p>}
         </>
+      )}
+      <h3>Move your taste to another machine</h3>
+      <p className="subtle">
+        Export saves your likes, dislikes, taste notes and what you told the DJ in one file. Import that file on the other machine to replace its taste with yours.
+      </p>
+      <div className="taste-transfer">
+        <a className="secondary-button" href="/api/v1/taste/export" download>
+          Export taste
+        </a>
+        <button className="secondary-button" disabled={importStatus.busy} onClick={() => picker.current?.click()}>
+          Import taste…
+        </button>
+        <input ref={picker} type="file" accept=".json,application/json" hidden onChange={(event) => void chooseFile(event)} />
+      </div>
+      {chosen && (
+        <div className="taste-confirm">
+          <p>
+            Replace your likes, dislikes, taste notes and what you told the DJ with the ones in <strong>{chosen.name}</strong>?
+          </p>
+          <div className="taste-transfer">
+            <button className="primary-button" disabled={importStatus.busy} onClick={() => void confirmImport()}>
+              Replace my taste
+            </button>
+            <button className="secondary-button" disabled={importStatus.busy} onClick={() => setChosen(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {importStatus.text && (
+        <p role="status" className={importStatus.failed ? "error-text" : "ok-text"}>
+          {importStatus.text}
+        </p>
       )}
     </div>
   );
