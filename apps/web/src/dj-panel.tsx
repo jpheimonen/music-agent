@@ -108,13 +108,6 @@ export function DjPanel(props: Props) {
     else if (!props.dj && !interviewing && starters.includes(text)) props.onStart(text === "Surprise me" ? "" : text);
     else submit(text);
   };
-  const forget = async (id: string) => {
-    try {
-      props.onMemory(await api(`/dj/notes/${id}`, djMemory, { method: "DELETE" }));
-    } catch (error) {
-      setChatError(describe(error));
-    }
-  };
   const startOver = async () => {
     abort.current?.abort();
     setInterviewing(false);
@@ -130,7 +123,6 @@ export function DjPanel(props: Props) {
   const replies = lastIsDj ? (lastDj?.suggestions ?? []) : [];
   const chips =
     sending !== null ? [] : interviewing ? [...replies, endInterview] : props.dj ? [...(replies.length ? replies : ["Something calmer", "More energy", "Surprise me"]), interviewMe] : [...starters, interviewMe];
-  const noteIds = new Set(props.memory?.notes.map((note) => note.id));
   // Talking needs Codex; starting the music also needs the DJ's source to be ready.
   const blocked = interviewing || props.dj ? Boolean(props.chatBlocker) : Boolean(props.blocker);
   const chipBlocked = (chip: string) => {
@@ -193,20 +185,6 @@ export function DjPanel(props: Props) {
           <li key={message.id} className={`bubble ${message.role}`}>
             <span className="sr-only">{message.role === "dj" ? "DJ: " : "You: "}</span>
             {message.text}
-            {message.notesAdded?.some((note) => noteIds.has(note.id)) && (
-              <span className="noted">
-                {message.notesAdded
-                  .filter((note) => noteIds.has(note.id))
-                  .map((note) => (
-                    <span key={note.id} className="note-chip">
-                      Noted: {note.text}
-                      <button aria-label={`Forget: ${note.text}`} title="Forget this" onClick={() => void forget(note.id)}>
-                        ×
-                      </button>
-                    </span>
-                  ))}
-              </span>
-            )}
           </li>
         ))}
         {sending !== null && (
@@ -217,17 +195,18 @@ export function DjPanel(props: Props) {
             </li>
           </>
         )}
+        {/* Quick replies sit at the end of the conversation, so they scroll with it. */}
+        {chips.length > 0 && (
+          <li className="suggestions" aria-label={interviewing ? "Quick answers" : "Ideas"}>
+            {chips.map((chip) => (
+              <button key={chip} className="chip" disabled={chipBlocked(chip)} onClick={() => choose(chip)}>
+                {chip}
+              </button>
+            ))}
+          </li>
+        )}
       </ol>
 
-      {chips.length > 0 && (
-        <div className="suggestions" aria-label={interviewing ? "Quick answers" : "Ideas"}>
-          {chips.map((chip) => (
-            <button key={chip} className="chip" disabled={chipBlocked(chip)} onClick={() => choose(chip)}>
-              {chip}
-            </button>
-          ))}
-        </div>
-      )}
       <form
         className="ask"
         onSubmit={(event) => {
