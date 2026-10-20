@@ -1365,6 +1365,10 @@ input[type="range"]::-moz-range-thumb {
   font-size: 14px;
   line-height: 1.45;
 }
+.history-list small {
+  color: var(--muted);
+  font-size: 14px;
+}
 .row-actions {
   display: flex;
   align-items: center;

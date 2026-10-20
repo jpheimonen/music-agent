@@ -1,5 +1,5 @@
 import React from "react";
-import { stationCatalog, type Capabilities, type MediaItem, type StationId } from "@music/contracts";
+import { stationCatalog, type Capabilities, type MediaItem, type PlayedTrack, type StationId } from "@music/contracts";
 import type { RadioMetadata } from "./radio-metadata";
 import { artistOf, stationLabel, stationNote, stations, type Entry } from "./model";
 
@@ -52,6 +52,39 @@ export function QueuePanel(props: {
             </li>
           ))}
         </ol>
+      )}
+    </section>
+  );
+}
+
+const playedAt = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+export function HistoryPanel(props: { plays: PlayedTrack[] }) {
+  return (
+    <section className="card" aria-labelledby="history-heading">
+      <div className="section-label">PLAYED BEFORE</div>
+      <h2 id="history-heading" className="sr-only">
+        Previously played
+      </h2>
+      {!props.plays.length ? (
+        <p className="empty-state">Songs you have listened to will show up here.</p>
+      ) : (
+        <ul className="catalog-list history-list">
+          {props.plays.slice(0, 50).map((play) => (
+            <li key={`${play.at}-${play.mediaId}`}>
+              <div>
+                <strong>{play.title}</strong>
+                <span>
+                  {play.artist ?? "Unknown artist"} · {play.source === "youtube" ? "YouTube" : "Your collection"}
+                </span>
+                <small>
+                  <time dateTime={play.at}>{playedAt(play.at)}</time> · {play.outcome === "finished" ? "Finished" : "Skipped"}
+                </small>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

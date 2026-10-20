@@ -5,6 +5,7 @@ import {
   artistNameKey,
   capabilities,
   djMemory,
+  playHistory,
   feedbackResponse,
   job,
   jobAccepted,
@@ -17,6 +18,7 @@ import {
   type Capabilities,
   type DjMemory,
   type MediaItem,
+  type PlayedTrack,
   type RadioSong,
   type StationId,
 } from "@music/contracts";
@@ -41,7 +43,7 @@ import {
 } from "./model";
 import { PlayerBar } from "./player-bar";
 import { DjPanel } from "./dj-panel";
-import { CollectionPanel, QueuePanel, RadioPanel } from "./panels";
+import { CollectionPanel, HistoryPanel, QueuePanel, RadioPanel } from "./panels";
 import { ArtistContent, SetupContent, TasteContent, type ArtistSubject } from "./dialogs";
 import "@fontsource-variable/archivo/wdth.css";
 import "@fontsource-variable/archivo/wdth-italic.css";
@@ -291,6 +293,14 @@ function App() {
     },
     [player, setNow],
   );
+  const [history, setHistory] = useState<PlayedTrack[]>([]);
+  const refreshHistory = useCallback(() => {
+    void api("/dj/plays", playHistory)
+      .then((result) => setHistory(result.plays))
+      .catch(() => {});
+  }, []);
+  const refreshHistoryRef = useRef(refreshHistory);
+  refreshHistoryRef.current = refreshHistory;
   // Skips and finished tracks teach the DJ. A track that never started tells it nothing.
   const reportPlay = useCallback(
     (outcome: "finished" | "skipped") => {
@@ -306,7 +316,9 @@ function App() {
           listenedSeconds: Math.min(elapsed, 86_400),
           durationSeconds: duration && Number.isFinite(duration) ? Math.min(duration, 86_400) : null,
         }),
-      }).catch(() => {});
+      })
+        .then(() => refreshHistoryRef.current())
+        .catch(() => {});
     },
     [player],
   );
@@ -371,10 +383,11 @@ function App() {
   useEffect(() => {
     void refreshCapabilities();
     void refreshTaste();
+    refreshHistory();
     void api("/dj/memory", djMemory)
       .then(setMemory)
       .catch(() => setMemory({ notes: [], conversation: [] }));
-  }, [refreshCapabilities, refreshTaste]);
+  }, [refreshCapabilities, refreshTaste, refreshHistory]);
   // yt-dlp installs itself on first start; show YouTube as ready when it is.
   useEffect(() => {
     if (cap?.youtubePlayback.state !== "scanning") return;
@@ -884,6 +897,7 @@ function App() {
             ) : (
               <>
                 <QueuePanel queue={queue} dj={dj} djPending={djPending} onPlay={playQueued} onDislike={(entry) => void dislikeQueued(entry)} onRemove={removeQueued} />
+                <HistoryPanel plays={history} />
                 {tab === "local" && (
                   <CollectionPanel
                     cap={cap}

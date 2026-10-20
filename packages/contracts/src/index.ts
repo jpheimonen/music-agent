@@ -87,6 +87,10 @@ export const tasteExport = z.object({
 export const tasteImportResult = z.object({ taste, memory: djMemory });
 // Skips and finished tracks teach the DJ alongside likes and dislikes.
 export const listeningEvent = z.object({ media: mediaItem, outcome: z.enum(['finished', 'skipped']), listenedSeconds: z.number().nonnegative().max(86_400), durationSeconds: z.number().nonnegative().max(86_400).nullable() });
+// Plays the app has recorded, newest first.
+export const playedTrack = z.object({ mediaId: z.string(), source: z.enum(['local', 'youtube']), title: z.string(), artist: z.string().nullable(), outcome: z.enum(['finished', 'skipped']), listenedSeconds: z.number(), durationSeconds: z.number().nullable(), at: z.string().datetime() });
+export const playHistory = z.object({ plays: z.array(playedTrack) });
+export type PlayedTrack = z.infer<typeof playedTrack>;
 export type MediaItem = z.infer<typeof mediaItem>;
 export type Capabilities = z.infer<typeof capabilities>;
 export type Job = z.infer<typeof job>;
