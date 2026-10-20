@@ -1,0 +1,38 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "The README already describes the new endpoint and the history view.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The full build already passed on the final checkout during the fast checks.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "The evaluator already ran the current build in the app and checked the view on desktop and mobile in light and dark themes, and the code has not changed since.",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The server and web test suites already passed during the fast checks, and the change does not touch shared code that many tests depend on.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "The change adds no authentication, untrusted input handling, shell or file access, or dependencies; the new route only reads plays the server already stores.",
+    "command": ""
+  },
+  {
+    "check": "design_system",
+    "run": false,
+    "reason": "The task folder has no design-system.json.",
+    "command": ""
+  }
+]

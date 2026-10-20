@@ -189,6 +189,7 @@ app.post('/api/v1/dj/recommendations', async (request, reply) => {
 });
 // The DJ conversation, and the notes the DJ keeps from it.
 app.get('/api/v1/dj/memory', async () => memory.snapshot());
+app.get('/api/v1/dj/plays', async () => ({ plays: memory.recentPlays(300).reverse() }));
 app.post('/api/v1/dj/messages', async (request, reply) => {
   const input = djMessageRequest.parse(request.body);
   if (input.mode === 'chat' && !input.text) return reply.code(400).send(fail('invalid_request', 'Write a message for the DJ.', 400, request.id).body);
