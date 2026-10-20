@@ -1,0 +1,38 @@
+[
+  {
+    "check": "docs",
+    "run": false,
+    "reason": "No commands, settings or documented behavior changed; the memory topic was already updated.",
+    "command": ""
+  },
+  {
+    "check": "build",
+    "run": false,
+    "reason": "The full build passed in the fast checks on the final commit.",
+    "command": ""
+  },
+  {
+    "check": "smoke",
+    "run": false,
+    "reason": "The work and evaluation passes already drove the running app on this same commit 7cb8a0d (title, chat layout, artist window, no Noted text).",
+    "command": ""
+  },
+  {
+    "check": "full_tests",
+    "run": false,
+    "reason": "The server and web test suites are the full suites and already passed.",
+    "command": ""
+  },
+  {
+    "check": "security",
+    "run": false,
+    "reason": "No dependency, auth, shell or file-access changes. I'll check the artist-name input handling in the code review instead.",
+    "command": ""
+  },
+  {
+    "check": "design_system",
+    "run": false,
+    "reason": "There is no design-system.json in the task folder.",
+    "command": ""
+  }
+]
